@@ -577,7 +577,62 @@ tr:hover td{background:#fafff9}
 </style>
 </head>
 <body>
-<div class="app">
+<!-- ══════════════════════════════════════
+     GİRİŞ EKRANI
+══════════════════════════════════════ -->
+<div id="loginScreen" style="
+  display:flex;position:fixed;inset:0;z-index:9999;
+  background:linear-gradient(135deg,#e8f5e9 0%,#c8e6c9 50%,#a5d6a7 100%);
+  align-items:center;justify-content:center;
+  font-family:'Nunito',sans-serif;
+">
+  <div style="
+    background:#fff;border-radius:24px;padding:40px 36px;
+    width:min(400px,92vw);
+    box-shadow:0 20px 60px rgba(13,122,0,.18);
+    text-align:center;
+  ">
+    <div style="
+      width:64px;height:64px;border-radius:18px;
+      background:linear-gradient(135deg,#13a400,#0d7a00);
+      display:flex;align-items:center;justify-content:center;
+      font-size:32px;margin:0 auto 16px;
+      box-shadow:0 8px 24px rgba(13,122,0,.25);
+    ">🌿</div>
+    <div style="font-size:22px;font-weight:900;color:#0d7a00;margin-bottom:4px">Tarım Stok Takip</div>
+    <div style="font-size:13px;color:#8aaa8a;margin-bottom:28px">Devam etmek için giriş yapın</div>
+    <div style="text-align:left;margin-bottom:14px">
+      <label style="font-size:12px;font-weight:700;color:#4a6a4a;display:block;margin-bottom:5px">E-posta</label>
+      <input id="loginEmail" type="email" placeholder="admin@ziraai.com"
+        style="width:100%;padding:12px 14px;border:1.5px solid #e0e0e0;border-radius:12px;font-family:'Nunito',sans-serif;font-size:14px;outline:none;transition:border .2s"
+        onfocus="this.style.borderColor='#13a400'" onblur="this.style.borderColor='#e0e0e0'"
+        onkeydown="if(event.key==='Enter')document.getElementById('loginPassword').focus()"
+      />
+    </div>
+    <div style="text-align:left;margin-bottom:22px">
+      <label style="font-size:12px;font-weight:700;color:#4a6a4a;display:block;margin-bottom:5px">Şifre</label>
+      <div style="position:relative">
+        <input id="loginPassword" type="password" placeholder="••••••••"
+          style="width:100%;padding:12px 44px 12px 14px;border:1.5px solid #e0e0e0;border-radius:12px;font-family:'Nunito',sans-serif;font-size:14px;outline:none;transition:border .2s"
+          onfocus="this.style.borderColor='#13a400'" onblur="this.style.borderColor='#e0e0e0'"
+          onkeydown="if(event.key==='Enter')doLogin()"
+        />
+        <span onclick="toggleLoginPass()" id="loginPassEye"
+          style="position:absolute;right:14px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;color:#8aaa8a;user-select:none">👁</span>
+      </div>
+    </div>
+    <div id="loginErr" style="display:none;background:#fff0f0;border:1px solid #ffcdd2;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:13px;font-weight:700;color:#e53935;text-align:left"></div>
+    <button id="loginBtn" onclick="doLogin()" style="
+      width:100%;padding:13px;border:none;border-radius:12px;
+      background:linear-gradient(135deg,#13a400,#0d7a00);color:#fff;
+      font-family:'Nunito',sans-serif;font-size:15px;font-weight:800;
+      cursor:pointer;transition:all .2s;box-shadow:0 6px 20px rgba(13,122,0,.3);
+    ">Giriş Yap</button>
+    <div id="loginSpinner" style="display:none;margin-top:14px;color:#8aaa8a;font-size:13px">⏳ Giriş yapılıyor...</div>
+  </div>
+</div>
+
+<div class="app" id="mainApp" style="display:none">
 
   <!-- TOPBAR -->
   <div class="topbar">
@@ -588,7 +643,7 @@ tr:hover td{background:#fafff9}
     <div class="topbar-nav">
       <button class="nav-btn active" onclick="showPage('stock')">Anasayfa</button>
       <button class="nav-btn" onclick="showPage('satis')">🛒 Satış Yap</button>
-      <button class="nav-btn" onclick="showPage('dashboard')">Durum</button>
+      <button class="nav-btn" onclick="showPage('dashboard')">Dashboard</button>
       <button class="nav-btn" onclick="showPage('alacaklar')">Alacaklar</button>
       <button class="nav-btn" onclick="showPage('verecekler')">Verecekler</button>
     </div>
@@ -600,6 +655,14 @@ tr:hover td{background:#fafff9}
         <span id="dbLabel">Bağlanıyor...</span>
       </div>
       <div class="topbar-date" id="topbarDate"></div>
+      <button onclick="doLogout()" style="
+        padding:6px 12px;border-radius:50px;border:1.5px solid var(--green-border);
+        background:transparent;font-family:'Nunito',sans-serif;font-size:12px;
+        font-weight:700;color:var(--text-3);cursor:pointer;transition:all .2s;
+        white-space:nowrap;
+      " onmouseover="this.style.background='var(--red-soft)';this.style.color='var(--red)';this.style.borderColor='var(--red)'"
+         onmouseout="this.style.background='transparent';this.style.color='var(--text-3)';this.style.borderColor='var(--green-border)'"
+      >Çıkış</button>
     </div>
   </div>
 
@@ -1635,9 +1698,82 @@ async function togglePaid(id,val,type){
 function filterPersonList(type,val){ type==='debtor'?loadDebtors(val):loadCreditors(val); }
 
 // ══════════════════════════════════════
-//  INIT
+//  AUTH & INIT
 // ══════════════════════════════════════
-(async()=>{ await checkDb(); await loadProducts(); })();
+
+function showLoginScreen(){
+  document.getElementById('loginScreen').style.display='flex';
+  document.getElementById('mainApp').style.display='none';
+}
+
+function showMainApp(){
+  document.getElementById('loginScreen').style.display='none';
+  document.getElementById('mainApp').style.display='grid';
+}
+
+function toggleLoginPass(){
+  const inp=document.getElementById('loginPassword');
+  const eye=document.getElementById('loginPassEye');
+  if(inp.type==='password'){ inp.type='text'; eye.textContent='🙈'; }
+  else { inp.type='password'; eye.textContent='👁'; }
+}
+
+async function doLogin(){
+  const email=document.getElementById('loginEmail').value.trim();
+  const pass=document.getElementById('loginPassword').value;
+  const errEl=document.getElementById('loginErr');
+  const btn=document.getElementById('loginBtn');
+  const spinner=document.getElementById('loginSpinner');
+
+  errEl.style.display='none';
+  if(!email||!pass){ errEl.textContent='E-posta ve şifre giriniz.'; errEl.style.display='block'; return; }
+
+  btn.disabled=true; btn.style.opacity='.6';
+  spinner.style.display='block';
+
+  const {data,error}=await db.auth.signInWithPassword({email,password:pass});
+
+  btn.disabled=false; btn.style.opacity='1';
+  spinner.style.display='none';
+
+  if(error){
+    errEl.textContent = error.message==='Invalid login credentials'
+      ? '❌ E-posta veya şifre hatalı.'
+      : '❌ '+error.message;
+    errEl.style.display='block';
+    document.getElementById('loginPassword').value='';
+    return;
+  }
+
+  showMainApp();
+  await loadProducts();
+}
+
+async function doLogout(){
+  if(!confirm('Çıkış yapmak istediğinize emin misiniz?')) return;
+  await db.auth.signOut();
+  showLoginScreen();
+  document.getElementById('loginEmail').value='';
+  document.getElementById('loginPassword').value='';
+}
+
+// Sayfa açılınca oturum kontrolü
+(async()=>{
+  const {data:{session}}=await db.auth.getSession();
+  if(session){
+    showMainApp();
+    await checkDb();
+    await loadProducts();
+  } else {
+    showLoginScreen();
+  }
+
+  // Oturum değişimini dinle (başka sekmeden çıkış yapılırsa)
+  db.auth.onAuthStateChange((event,session)=>{
+    if(event==='SIGNED_OUT') showLoginScreen();
+    if(event==='SIGNED_IN') showMainApp();
+  });
+})();
 
 // ══════════════════════════════════════
 //  CREDITORS
