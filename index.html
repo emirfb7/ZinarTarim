@@ -229,6 +229,39 @@ tr:hover td{background:#fafff9}
 .cred-grup-body.open{display:block}
 .cred-grup-row{display:flex;align-items:center;gap:10px;padding:7px 14px;border-bottom:1px solid rgba(19,164,0,.08)}
 .cred-grup-row:last-of-type{border-bottom:none}
+
+/* STOĞA EKLENDİ TOGGLE */
+.stoga-toggle{
+  padding:4px 9px;border-radius:50px;border:1.5px solid var(--green-border);
+  background:var(--white);font-family:'Nunito',sans-serif;font-size:10px;
+  font-weight:700;cursor:pointer;color:var(--text-3);
+  transition:all .18s;white-space:nowrap;flex-shrink:0;
+}
+.stoga-toggle:hover{border-color:var(--green);color:var(--green);background:var(--green-soft)}
+.stoga-toggle.on{
+  background:#1b5e20;color:#fff;border-color:#1b5e20;
+}
+.stoga-toggle.on:hover{background:#2e7d32;border-color:#2e7d32}
+/* İade bekliyor — turuncu */
+.stoga-toggle.warn{
+  background:#fff8e1;border-color:#f57c00;color:#f57c00;
+}
+.stoga-toggle.warn:hover{background:#f57c00;color:#fff;border-color:#f57c00}
+
+/* Satır arkaplanı — iade bekliyor */
+.cred-grup-row.iade-bekliyor{
+  background:linear-gradient(90deg,rgba(245,124,0,.07),rgba(245,124,0,.02));
+  border-left:3px solid var(--orange);
+}
+
+/* Stoğa eklendi satır arkaplanı */
+.cred-grup-row.stoga-eklendi{
+  background:linear-gradient(90deg,rgba(19,164,0,.07),rgba(19,164,0,.03));
+}
+.cred-grup-row.stoga-eklendi .trans-date,
+.cred-grup-row.stoga-eklendi>div:nth-child(2){
+  opacity:.8;
+}
 .empty-state{text-align:center;padding:40px 16px;color:var(--text-3)}
 .empty-icon{font-size:40px;margin-bottom:10px}
 .empty-state p{font-size:13px;font-weight:600}
@@ -1700,21 +1733,38 @@ function renderCreditorDetail(id){
 
             <!-- GRUP İÇİ — gizli başlıyor -->
             <div class="cred-grup-body" id="cgb-${id}-${gi}">
-              ${g.items.map(t=>`
-                <div class="cred-grup-row">
+              ${g.items.map(t=>{
+                const stogaEklendi=!!t.stoga_eklendi;
+                const iadeVar=Number(t.iade_qty||0)>0;
+                // İade var ve stoğa eklendi işaretliyse → tutarsız durum (iade bekliyor)
+                const iadeBekliyor=iadeVar&&!stogaEklendi;
+                return `
+                <div class="cred-grup-row ${stogaEklendi?'stoga-eklendi':''} ${iadeBekliyor?'iade-bekliyor':''}">
                   <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text-3);width:78px;flex-shrink:0">${t.date}</div>
-                  <div style="flex:1;font-size:12px;color:var(--text-2)">
-                    ${Number(t.qty).toLocaleString('tr-TR')} ${t.unit}
-                    <span style="color:var(--text-3)">× ${Number(t.price).toLocaleString('tr-TR')} ₺</span>
-                    ${t.iade_qty>0?`<span style="color:var(--red);font-weight:700;margin-left:4px">↩ ${Number(t.iade_qty).toLocaleString('tr-TR')} ${t.unit} iade</span>`:''}
+                  <div style="flex:1;font-size:12px;color:var(--text-2);min-width:0">
+                    <div>${Number(t.qty).toLocaleString('tr-TR')} ${t.unit}
+                      <span style="color:var(--text-3)">× ${Number(t.price).toLocaleString('tr-TR')} ₺</span>
+                    </div>
+                    ${iadeVar?`
+                    <div style="font-size:10px;font-weight:700;color:var(--orange);margin-top:2px">
+                      ↩ ${Number(t.iade_qty).toLocaleString('tr-TR')} ${t.unit} iade
+                      ${t.iade_date?`<span style="font-weight:400;color:var(--text-3)">(${t.iade_date})</span>`:''}
+                      ${!stogaEklendi?'<span style="color:var(--red)"> — Stoğa eklenmeyi bekliyor</span>':''}
+                    </div>`:''}
                   </div>
-                  <div style="font-size:12px;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--green-dark);flex-shrink:0;margin-right:8px">
+                  <div style="font-size:12px;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--green-dark);flex-shrink:0;margin-right:6px">
                     ${Number(t.total).toLocaleString('tr-TR')} ₺
                   </div>
-                  <div style="display:flex;gap:3px;flex-shrink:0">
+                  <button class="stoga-toggle ${stogaEklendi?'on':''} ${iadeBekliyor?'warn':''}"
+                    title="${stogaEklendi?'Stoğa eklendi (geri al)': iadeVar?'İade stoğa eklendiyse işaretle':'Stoğa eklendi olarak işaretle'}"
+                    onclick="toggleStogaEklendi(${t.id},${stogaEklendi?'false':'true'},${iadeVar});event.stopPropagation()">
+                    ${stogaEklendi?'📦 Eklendi': iadeBekliyor?'📦 İade Ekle':'📦 Ekle'}
+                  </button>
+                  <div style="display:flex;gap:3px;flex-shrink:0;margin-left:4px">
                     <button class="pi-action-btn edit" title="Düzenle" onclick="openModal('editCreditorTrans',${t.id});event.stopPropagation()">✏️</button>
                   </div>
-                </div>`).join('')}
+                </div>`;
+              }).join('')}
               <!-- Grup özet satırı -->
               <div style="display:flex;justify-content:space-between;padding:6px 12px 8px;border-top:1px solid var(--green-border);margin-top:4px">
                 <span style="font-size:11px;font-weight:700;color:var(--text-3)">Toplam: ${g.toplamQty.toLocaleString('tr-TR')} ${g.unit}</span>
@@ -1731,6 +1781,23 @@ function toggleCreditorGroup(key){
   if(!body) return;
   const open=body.classList.toggle('open');
   if(arrow){ arrow.style.transform=open?'rotate(180deg)':'rotate(0deg)'; }
+}
+
+async function toggleStogaEklendi(txId, yeniDurum, iadeVar=false){
+  // İade varken ve stoğa eklendi işaretleniyorsa — onay al
+  if(yeniDurum && iadeVar){
+    if(!confirm('Bu alımda iade var. İade miktarını stoğa manuel eklediniz mi?\n\n"Tamam" — Evet, stoğa ekledim, işaretle\n"İptal" — Hayır, henüz eklemedim')) return;
+  }
+  let creditorId=null;
+  for(const c of S.creditors){
+    const tx=(c.creditor_transactions||[]).find(t=>t.id===txId);
+    if(tx){ tx.stoga_eklendi=yeniDurum; creditorId=c.id; break; }
+  }
+  const {error}=await db.from('creditor_transactions').update({stoga_eklendi:yeniDurum}).eq('id',txId);
+  if(error){ toast('❌ '+error.message,true); return; }
+  toast(yeniDurum?'📦 Stoğa eklendi olarak işaretlendi':'↩ İşaret kaldırıldı');
+  await loadCreditors();
+  if(S.activeCreditorId===creditorId) renderCreditorDetail(creditorId);
 }
 
 // ══════════════════════════════════════
@@ -2159,49 +2226,38 @@ async function saveEditCreditorTrans(){
   if(!prod||!qty||!unit||!price){toast('⚠️ Tüm alanları doldurun',true);return;}
   if(iadeQty>qty){toast('⚠️ İade miktarı alınan miktardan fazla olamaz',true);return;}
 
-  // Mevcut kaydı bul (iade değişimini hesaplamak için)
   let eskiTx=null, creditorId=null;
   for(const c of S.creditors){
     eskiTx=(c.creditor_transactions||[]).find(t=>t.id===_mId);
     if(eskiTx){creditorId=c.id;break;}
   }
 
+  const eskiIade=Number(eskiTx?.iade_qty||0);
+  // İade yeni girildiyse veya artmışsa → stoga_eklendi false yap
+  // Çünkü iade olan ürünün stoğa tekrar eklenmesi gerekiyor
+  const iadeArtiYeni = iadeQty > eskiIade;
+  const stogaEklendiDeger = iadeArtiYeni ? false : (eskiTx?.stoga_eklendi||false);
+
   showLoad();
 
-  // İşlemi güncelle
   const {error}=await db.from('creditor_transactions').update({
     product:prod, qty, unit, price, total:qty*price, date,
-    iade_qty:iadeQty, iade_date:iadeQty>0?iadeDate:null
+    iade_qty:iadeQty,
+    iade_date:iadeQty>0?iadeDate:null,
+    stoga_eklendi:stogaEklendiDeger  // iade artmışsa sıfırla
   }).eq('id',_mId);
 
   if(error){hideLoad();toast('❌ '+error.message,true);return;}
 
-  // İade varsa stoğa geri ekle
-  if(iadeQty>0){
-    // Bu ürün adına göre stok bul ve ekle
-    const eskiIade=Number(eskiTx?.iade_qty||0);
-    const iadeArtan=iadeQty-eskiIade; // yeni iade - eski iade = net fark
-    if(iadeArtan!==0){
-      // Ürün adıyla stokta eşleşen ürünü bul
-      const urun=S.products.find(p=>p.name.trim().toLowerCase()===prod.trim().toLowerCase());
-      if(urun&&iadeArtan>0){
-        await db.from('products').update({
-          stock:urun.stock+iadeArtan,
-          last_in:iadeDate
-        }).eq('id',urun.id);
-        toast(`✅ Güncellendi — ${iadeArtan} ${unit} stoğa iade eklendi`);
-      } else {
-        toast('✅ Alım güncellendi' + (iadeQty>0?' (stokta eşleşen ürün bulunamadı, manuel ekleyin)':''));
-      }
-    } else {
-      toast('✅ Alım güncellendi');
-    }
-  } else {
-    toast('✅ Alım güncellendi');
+  // Toast mesajı
+  let toastMsg='✅ Alım güncellendi';
+  if(iadeArtiYeni){
+    toastMsg=`⚠️ ${iadeQty} ${unit} iade girildi — "Stoğa eklendi" işareti kaldırıldı. İade ürünü stoğa ekledikten sonra tekrar işaretleyin.`;
   }
 
   hideLoad();
   closeModal();
+  toast(toastMsg, iadeArtiYeni);
   await loadCreditors();
   if(S.activeCreditorId===creditorId) renderCreditorDetail(creditorId);
   await loadProducts();
