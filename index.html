@@ -555,7 +555,7 @@ tr:hover td{background:#fafff9}
     <div class="topbar-nav">
       <button class="nav-btn active" onclick="showPage('stock')">Anasayfa</button>
       <button class="nav-btn" onclick="showPage('satis')">🛒 Satış Yap</button>
-      <button class="nav-btn" onclick="showPage('dashboard')">Durum</button>
+      <button class="nav-btn" onclick="showPage('dashboard')">Dashboard</button>
       <button class="nav-btn" onclick="showPage('alacaklar')">Alacaklar</button>
       <button class="nav-btn" onclick="showPage('verecekler')">Verecekler</button>
     </div>
@@ -1706,9 +1706,13 @@ function renderCreditorDetail(id){
                   <div style="flex:1;font-size:12px;color:var(--text-2)">
                     ${Number(t.qty).toLocaleString('tr-TR')} ${t.unit}
                     <span style="color:var(--text-3)">× ${Number(t.price).toLocaleString('tr-TR')} ₺</span>
+                    ${t.iade_qty>0?`<span style="color:var(--red);font-weight:700;margin-left:4px">↩ ${Number(t.iade_qty).toLocaleString('tr-TR')} ${t.unit} iade</span>`:''}
                   </div>
-                  <div style="font-size:12px;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--green-dark);flex-shrink:0">
+                  <div style="font-size:12px;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--green-dark);flex-shrink:0;margin-right:8px">
                     ${Number(t.total).toLocaleString('tr-TR')} ₺
+                  </div>
+                  <div style="display:flex;gap:3px;flex-shrink:0">
+                    <button class="pi-action-btn edit" title="Düzenle" onclick="openModal('editCreditorTrans',${t.id});event.stopPropagation()">✏️</button>
                   </div>
                 </div>`).join('')}
               <!-- Grup özet satırı -->
@@ -1784,10 +1788,15 @@ function openModal(type,id=null){
       </div>
       <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">İptal</button><button class="btn btn-green" onclick="updateProduct()">Güncelle</button></div>`,
 
-    addStock:`<h3>📥 Stok Ekle — ${p?.name||''}</h3>
-      <div class="form-group"><label>Miktar (${p?.unit||''})</label><input id="f-qty" type="number" min="1" placeholder="0"/></div>
+    addStock:`<h3>📥 Stok Ekle</h3>
+      <div style="background:var(--green-light);border:1.5px solid var(--green);border-radius:12px;padding:12px 16px;margin-bottom:16px">
+        <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Ürün</div>
+        <div style="font-size:16px;font-weight:900;color:var(--green-dark)">${p?.name||'—'}</div>
+        <div style="font-size:12px;color:var(--text-3);margin-top:2px">Mevcut stok: <b>${p?.stock||0} ${p?.unit||''}</b></div>
+      </div>
+      <div class="form-group"><label>Eklenecek Miktar (${p?.unit||''})</label><input id="f-qty" type="number" min="1" placeholder="0"/></div>
       <div class="form-group"><label>Tarih</label><input id="f-date" type="date" value="${today}"/></div>
-      <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">İptal</button><button class="btn btn-green" onclick="doAddStock()">Ekle</button></div>`,
+      <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">İptal</button><button class="btn btn-green" onclick="doAddStock()">✅ Stoğa Ekle</button></div>`,
 
     removeStock:`<h3>📤 Stok Çıkışı — ${p?.name||''}</h3>
       <p style="font-size:12px;color:var(--text-3);margin-bottom:12px">Mevcut: <b>${p?.stock||0} ${p?.unit||''}</b></p>
@@ -1832,6 +1841,35 @@ function openModal(type,id=null){
       <div class="form-group"><label>Birim Fiyat (₺)</label><input id="f-price" type="number" placeholder="0"/></div>
       <div class="form-group"><label>Tarih</label><input id="f-date" type="date" value="${today}"/></div>
       <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">İptal</button><button class="btn btn-green" onclick="saveCreditorTrans()">Kaydet</button></div>`,
+
+    editCreditorTrans:`<h3>✏️ Alımı Düzenle</h3>
+      <div id="ect-urun-bilgi" style="background:var(--green-light);border:1px solid var(--green-border);border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:13px;font-weight:700;color:var(--green-dark)">⏳ Yükleniyor...</div>
+      <div class="form-group"><label>Ürün Adı</label><input id="f-prod" placeholder="Ürün adı"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Alınan Miktar</label><input id="f-qty" type="number" placeholder="0" min="0"/></div>
+        <div class="form-group"><label>Birim</label><input id="f-unit" placeholder="kg / lt / adet"/></div>
+      </div>
+      <div class="form-group"><label>Birim Fiyat (₺)</label><input id="f-price" type="number" placeholder="0"/></div>
+      <div class="form-group"><label>Tarih</label><input id="f-date" type="date" value="${today}"/></div>
+      <div style="background:#fff8e1;border:1.5px solid #ffe082;border-radius:10px;padding:12px 14px;margin-bottom:12px">
+        <div style="font-size:12px;font-weight:800;color:var(--orange);margin-bottom:8px">↩ İade</div>
+        <div class="form-row" style="margin:0">
+          <div class="form-group" style="margin:0">
+            <label>İade Miktarı <span style="font-weight:400;color:var(--text-3)">(0 = iade yok)</span></label>
+            <input id="f-iade-qty" type="number" placeholder="0" min="0" value="0"/>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>İade Tarihi</label>
+            <input id="f-iade-date" type="date" value="${today}"/>
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--text-3);margin-top:6px">İade girilirse stoğa otomatik geri eklenir</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="closeModal()">İptal</button>
+        <button class="btn btn-red btn-sm" onclick="deleteCreditorTrans()">🗑️ Sil</button>
+        <button class="btn btn-green" onclick="saveEditCreditorTrans()">💾 Kaydet</button>
+      </div>`,
 
     addPayment:`<h3>💵 Ödeme Girişi Ekle</h3>
       <p style="font-size:12px;color:var(--text-3);margin-bottom:14px">Bu işlem için yapılan kısmi veya tam ödemeyi kaydedin.</p>
@@ -1899,6 +1937,27 @@ function openModal(type,id=null){
     const c=S.creditors.find(x=>x.id===id);
     if(c) setTimeout(()=>{ const inp=document.getElementById('f-name'); if(inp){inp.value=c.name; inp.select();} },50);
   }
+  // editCreditorTrans için mevcut alım verisini doldur
+  if(type==='editCreditorTrans'){
+    setTimeout(()=>{
+      let tx=null;
+      for(const c of S.creditors){
+        tx=(c.creditor_transactions||[]).find(t=>t.id===id);
+        if(tx) break;
+      }
+      if(!tx) return;
+      const bilgi=document.getElementById('ect-urun-bilgi');
+      if(bilgi) bilgi.textContent=`${tx.product} — ${Number(tx.qty).toLocaleString('tr-TR')} ${tx.unit} × ${Number(tx.price).toLocaleString('tr-TR')} ₺ = ${Number(tx.total).toLocaleString('tr-TR')} ₺`;
+      const set=(elId,val)=>{ const el=document.getElementById(elId); if(el) el.value=val; };
+      set('f-prod',tx.product);
+      set('f-qty',tx.qty);
+      set('f-unit',tx.unit);
+      set('f-price',tx.price);
+      set('f-date',tx.date);
+      set('f-iade-qty',tx.iade_qty||0);
+      if(tx.iade_date) set('f-iade-date',tx.iade_date);
+    },60);
+  }
 }
 function closeModal(){ document.getElementById('modalBg').classList.remove('open'); }
 
@@ -1954,7 +2013,9 @@ async function doAddStock(){
   const {error}=await db.from('products').update({stock:p.stock+qty,last_in:date}).eq('id',_mId);
   hideLoad();
   if(error){toast('❌ '+error.message,true);return;}
-  closeModal(); toast(`✅ ${qty} ${p.unit} eklendi!`); loadProducts();
+  closeModal();
+  toast(`📥 "${p.name}" — ${qty} ${p.unit} stoğa eklendi! (Yeni stok: ${p.stock+qty} ${p.unit})`);
+  loadProducts();
 }
 
 async function doRemoveStock(){
@@ -2089,6 +2150,77 @@ async function saveCreditorTrans(){
   hideLoad();
   if(error){toast('❌ '+error.message,true);return;}
   closeModal(); toast('✅ Alım eklendi!'); loadCreditors();
+}
+
+async function saveEditCreditorTrans(){
+  const prod=fv('f-prod'),qty=+fv('f-qty'),unit=fv('f-unit'),price=+fv('f-price'),date=fv('f-date');
+  const iadeQty=+fv('f-iade-qty')||0;
+  const iadeDate=fv('f-iade-date')||date;
+  if(!prod||!qty||!unit||!price){toast('⚠️ Tüm alanları doldurun',true);return;}
+  if(iadeQty>qty){toast('⚠️ İade miktarı alınan miktardan fazla olamaz',true);return;}
+
+  // Mevcut kaydı bul (iade değişimini hesaplamak için)
+  let eskiTx=null, creditorId=null;
+  for(const c of S.creditors){
+    eskiTx=(c.creditor_transactions||[]).find(t=>t.id===_mId);
+    if(eskiTx){creditorId=c.id;break;}
+  }
+
+  showLoad();
+
+  // İşlemi güncelle
+  const {error}=await db.from('creditor_transactions').update({
+    product:prod, qty, unit, price, total:qty*price, date,
+    iade_qty:iadeQty, iade_date:iadeQty>0?iadeDate:null
+  }).eq('id',_mId);
+
+  if(error){hideLoad();toast('❌ '+error.message,true);return;}
+
+  // İade varsa stoğa geri ekle
+  if(iadeQty>0){
+    // Bu ürün adına göre stok bul ve ekle
+    const eskiIade=Number(eskiTx?.iade_qty||0);
+    const iadeArtan=iadeQty-eskiIade; // yeni iade - eski iade = net fark
+    if(iadeArtan!==0){
+      // Ürün adıyla stokta eşleşen ürünü bul
+      const urun=S.products.find(p=>p.name.trim().toLowerCase()===prod.trim().toLowerCase());
+      if(urun&&iadeArtan>0){
+        await db.from('products').update({
+          stock:urun.stock+iadeArtan,
+          last_in:iadeDate
+        }).eq('id',urun.id);
+        toast(`✅ Güncellendi — ${iadeArtan} ${unit} stoğa iade eklendi`);
+      } else {
+        toast('✅ Alım güncellendi' + (iadeQty>0?' (stokta eşleşen ürün bulunamadı, manuel ekleyin)':''));
+      }
+    } else {
+      toast('✅ Alım güncellendi');
+    }
+  } else {
+    toast('✅ Alım güncellendi');
+  }
+
+  hideLoad();
+  closeModal();
+  await loadCreditors();
+  if(S.activeCreditorId===creditorId) renderCreditorDetail(creditorId);
+  await loadProducts();
+}
+
+async function deleteCreditorTrans(){
+  if(!confirm('Bu alım kaydını silmek istediğinize emin misiniz?')) return;
+  let creditorId=null;
+  for(const c of S.creditors){
+    if((c.creditor_transactions||[]).find(t=>t.id===_mId)){creditorId=c.id;break;}
+  }
+  showLoad();
+  const {error}=await db.from('creditor_transactions').delete().eq('id',_mId);
+  hideLoad();
+  if(error){toast('❌ '+error.message,true);return;}
+  closeModal();
+  toast('🗑️ Alım kaydı silindi');
+  await loadCreditors();
+  if(S.activeCreditorId===creditorId) renderCreditorDetail(creditorId);
 }
 
 function setFullPayment(){
