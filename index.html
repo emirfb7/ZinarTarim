@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -124,7 +125,18 @@ html,body{height:100%;font-family:'Nunito',sans-serif;background:var(--bg);color
 .dash-search{padding:7px 12px;border:1.5px solid var(--green-border);border-radius:8px;font-family:'Nunito',sans-serif;font-size:12px;color:var(--text);outline:none;background:var(--white);width:160px;transition:border .2s}
 .dash-search:focus{border-color:var(--green)}
 
-/* PDF BUTONU */
+/* YEDEk BUTONU */
+.btn-yedek{
+  background:linear-gradient(135deg,#1565c0,#0d47a1);
+  color:#fff;border:none;padding:11px 24px;border-radius:10px;
+  font-family:'Nunito',sans-serif;font-size:14px;font-weight:800;
+  cursor:pointer;display:flex;align-items:center;gap:8px;
+  box-shadow:0 4px 16px rgba(13,71,161,.25);
+  transition:all .2s;letter-spacing:.02em;
+}
+.btn-yedek:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(13,71,161,.35)}
+.btn-yedek:active{transform:translateY(0)}
+.btn-yedek:disabled{background:#ccc;cursor:not-allowed;transform:none}
 .btn-pdf{
   background:linear-gradient(135deg,#1a6b3a,#13a400);
   color:#fff;border:none;padding:11px 28px;border-radius:10px;
@@ -861,8 +873,11 @@ tr:hover td{background:#fafff9}
           </table>
         </div>
 
-        <!-- PDF Butonu -->
-        <div style="display:flex;justify-content:flex-end;margin-top:16px">
+        <!-- Alt Butonlar -->
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;flex-wrap:wrap;gap:10px">
+          <button class="btn-yedek" onclick="tamYedekAl()" id="yedekBtn">
+            <span style="font-size:16px">🛡️</span> Tam Yedek Al
+          </button>
           <button class="btn btn-pdf" onclick="exportPDF()" id="pdfBtn">
             <span style="font-size:16px">⬇</span> PDF Çıktısı Al
           </button>
@@ -1326,6 +1341,137 @@ async function loadDashboardInit(){
   document.getElementById('dashDateTo').value   = t;
   dashState.from = t; dashState.to = t;
   await loadDashboard();
+}
+
+// ══════════════════════════════════════
+//  TAM VERİ YEDEĞİ — XLSX
+// ══════════════════════════════════════
+async function tamYedekAl(){
+  const btn = document.getElementById('yedekBtn');
+  btn.innerHTML = '⏳ Veriler çekiliyor...';
+  btn.disabled = true;
+
+  try{
+    // Tüm tabloları paralel çek
+    btn.innerHTML = '⏳ Tablolar yükleniyor...';
+    const [
+      {data: products},
+      {data: sales},
+      {data: debtors},
+      {data: debtor_transactions},
+      {data: debt_payments},
+      {data: creditors},
+      {data: creditor_transactions},
+      {data: creditor_payments},
+    ] = await Promise.all([
+      db.from('products').select('*').order('name'),
+      db.from('sales').select('*').order('sale_date', {ascending:false}),
+      db.from('debtors').select('*').order('name'),
+      db.from('debtor_transactions').select('*').order('date', {ascending:false}),
+      db.from('debt_payments').select('*').order('date', {ascending:false}),
+      db.from('creditors').select('*').order('name'),
+      db.from('creditor_transactions').select('*').order('date', {ascending:false}),
+      db.from('creditor_payments').select('*').order('date', {ascending:false}),
+    ]);
+
+    btn.innerHTML = '⏳ Excel oluşturuluyor...';
+
+    const wb = XLSX.utils.book_new();
+    const simdi = new Date().toLocaleString('tr-TR');
+
+    // Yardımcı: obje dizisini sayfaya ekle
+    function ekSayfa(veri, sayfaAdi, kolonSirasi=null){
+      if(!veri || veri.length === 0){
+        const ws = XLSX.utils.aoa_to_sheet([['Veri yok']]);
+        XLSX.utils.book_append_sheet(wb, ws, sayfaAdi);
+        return;
+      }
+      // Kolon sırasını belirle
+      const kolonlar = kolonSirasi || Object.keys(veri[0]);
+      const satirlar = veri.map(r => kolonlar.map(k => r[k] ?? ''));
+      const ws = XLSX.utils.aoa_to_sheet([kolonlar, ...satirlar]);
+
+      // Başlık satırı kalın
+      const range = XLSX.utils.decode_range(ws['!ref']);
+      for(let c = range.s.c; c <= range.e.c; c++){
+        const hucre = XLSX.utils.encode_cell({r:0, c});
+        if(!ws[hucre]) continue;
+        ws[hucre].s = { font:{bold:true}, fill:{fgColor:{rgb:'C8E6C9'}} };
+      }
+      // Kolon genişlikleri
+      ws['!cols'] = kolonlar.map(k=>({wch: Math.max(k.length+2, 14)}));
+      XLSX.utils.book_append_sheet(wb, ws, sayfaAdi);
+    }
+
+    // ── Özet Sayfası ──
+    const kalanAlacak = (debtor_transactions||[]).reduce((a,t)=>a+Number(t.total),0)
+      - (debt_payments||[]).reduce((a,p)=>a+Number(p.amount),0);
+    const kalanVerecek = (creditor_transactions||[]).reduce((a,t)=>a+Number(t.total),0)
+      - (creditor_payments||[]).reduce((a,p)=>a+Number(p.amount),0);
+    const toplamSatis = (sales||[]).reduce((a,s)=>a+Number(s.total),0);
+
+    const ozet = XLSX.utils.aoa_to_sheet([
+      ['TARIM STOK TAKİP — TAM VERİ YEDEĞİ'],
+      ['Yedek Tarihi:', simdi],
+      [],
+      ['TABLO', 'KAYIT SAYISI'],
+      ['Ürünler (Stok)',        (products||[]).length],
+      ['Satışlar',              (sales||[]).length],
+      ['Alacaklı Kişiler',     (debtors||[]).length],
+      ['Alacak İşlemleri',     (debtor_transactions||[]).length],
+      ['Alacak Ödemeleri',     (debt_payments||[]).length],
+      ['Tedarikçiler',         (creditors||[]).length],
+      ['Tedarikçi Alımları',   (creditor_transactions||[]).length],
+      ['Tedarikçi Ödemeleri',  (creditor_payments||[]).length],
+      [],
+      ['ÖZET BİLGİ', ''],
+      ['Toplam Satış Tutarı',  toplamSatis.toLocaleString('tr-TR') + ' ₺'],
+      ['Toplam Alacak (Kalan)', Math.max(0,kalanAlacak).toLocaleString('tr-TR') + ' ₺'],
+      ['Toplam Verecek (Kalan)',Math.max(0,kalanVerecek).toLocaleString('tr-TR') + ' ₺'],
+    ]);
+    ozet['!cols'] = [{wch:30},{wch:25}];
+    XLSX.utils.book_append_sheet(wb, ozet, '📋 Özet');
+
+    // ── Tablo Sayfaları ──
+    ekSayfa(products,              '🌿 Ürünler',
+      ['id','name','cat','sub','stock','unit','price','min_stock','last_in','last_out']);
+
+    ekSayfa(sales,                 '🛒 Satışlar',
+      ['id','sale_date','sale_time','product_name','cat','qty','unit','price','total']);
+
+    ekSayfa(debtors,               '💳 Alacaklılar',
+      ['id','name','created_at']);
+
+    ekSayfa(debtor_transactions,   '💳 Alacak İşlemleri',
+      ['id','debtor_id','date','product','qty','unit','price','total','paid']);
+
+    ekSayfa(debt_payments,         '💳 Alacak Ödemeleri',
+      ['id','debtor_id','transaction_id','date','amount','note']);
+
+    ekSayfa(creditors,             '📦 Tedarikçiler',
+      ['id','name','created_at']);
+
+    ekSayfa(creditor_transactions, '📦 Tedarikçi Alımları',
+      ['id','creditor_id','date','product','qty','unit','price','total',
+       'iade_qty','iade_date','stoga_eklendi']);
+
+    ekSayfa(creditor_payments,     '📦 Tedarikçi Ödemeleri',
+      ['id','creditor_id','transaction_id','date','amount','note']);
+
+    // ── İndir ──
+    const tarihDosya = new Date().toISOString().slice(0,10);
+    const dosyaAdi = `tarim-stok-yedek_${tarihDosya}.xlsx`;
+    XLSX.writeFile(wb, dosyaAdi);
+
+    toast(`✅ Yedek indirildi — ${dosyaAdi}`);
+
+  }catch(e){
+    toast('❌ Yedek alınamadı: '+e.message, true);
+    console.error(e);
+  }finally{
+    btn.innerHTML = '<span style="font-size:16px">🛡️</span> Tam Yedek Al';
+    btn.disabled = false;
+  }
 }
 
 // ══════════════════════════════════════
