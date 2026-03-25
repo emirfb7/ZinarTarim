@@ -1781,7 +1781,7 @@ async function doLogout(){
 async function loadCreditors(filter=''){
   showLoad();
   try{
-    let q=db.from('creditors').select('*, creditor_transactions(*)').order('name');
+    let q=db.from('creditors').select('*, creditor_transactions(*, creditor_payments(*))').order('name');
     if(filter) q=q.ilike('name',`%${filter}%`);
     const {data,error}=await q;
     if(error) throw error;
@@ -1796,17 +1796,22 @@ function renderCreditorList(){
   const list=document.getElementById('creditorList');
   if(!S.creditors.length){list.innerHTML=`<div class="empty-state"><div class="empty-icon">🏭</div><p>Henüz tedarikçi yok</p></div>`;return;}
   list.innerHTML=S.creditors.map(c=>{
-    const total=(c.creditor_transactions||[]).reduce((a,t)=>a+Number(t.total),0);
-    const txSayi=(c.creditor_transactions||[]).length;
+    const txs=c.creditor_transactions||[];
+    const totalBorc=txs.reduce((a,t)=>a+Number(t.total),0);
+    const totalOdenen=txs.flatMap(t=>t.creditor_payments||[]).reduce((a,p)=>a+Number(p.amount),0);
+    const kalan=Math.max(0,totalBorc-totalOdenen);
+    const txSayi=txs.length;
     return `<div class="person-item ${S.activeCreditorId===c.id?'active':''}" onclick="selectCreditor(${c.id})">
       <div style="flex:1;min-width:0">
         <div class="pi-name">${c.name}</div>
-        <div class="pi-amount credit" style="margin-top:2px">${total>0?total.toLocaleString('tr-TR')+' ₺':'— Alım yok'}</div>
+        <div style="margin-top:2px;font-size:12px;font-weight:800;font-family:'JetBrains Mono',monospace;color:${kalan>0?'var(--orange)':'var(--green)'}">
+          ${kalan>0?kalan.toLocaleString('tr-TR')+' ₺ borç':'✓ Ödendi'}
+        </div>
       </div>
       <div style="display:flex;gap:4px;flex-shrink:0;margin-left:6px" onclick="event.stopPropagation()">
         <button class="pi-action-btn edit" title="İsim Düzenle" onclick="openModal('editCreditor',${c.id})">✏️</button>
         <button class="pi-action-btn del" title="Tedarikçiyi Sil"
-          onclick="deleteCreditor(${c.id},'${c.name.replace(/'/g,"\\'")}',${txSayi})">🗑️</button>
+          onclick="deleteCreditor(${c.id},'${c.name.replace(/'/g,"\'")}',${txSayi})">🗑️</button>
       </div>
     </div>`;
   }).join('');
@@ -1831,6 +1836,10 @@ function renderCreditorDetail(id){
   });
   const grupListesi = Object.values(gruplar).sort((a,b)=>b.toplamTutar-a.toplamTutar);
 
+  const totalOdenen=txs.flatMap(t=>t.creditor_payments||[]).reduce((a,p)=>a+Number(p.amount),0);
+  const kalanBorc=Math.max(0,total-totalOdenen);
+  const tamOdendi=kalanBorc<=0;
+
   document.getElementById('creditorDetail').innerHTML=`
     <div class="detail-header">
       <div>
@@ -1840,10 +1849,26 @@ function renderCreditorDetail(id){
         </div>
       </div>
       <div style="text-align:right">
-        <div class="detail-total credit">${total.toLocaleString('tr-TR')} ₺</div>
-        <div style="font-size:10px;color:var(--text-3)">Toplam Alım</div>
-        <button class="btn btn-green btn-sm" style="margin-top:6px" onclick="openModal('addCreditorTrans',${c.id})">＋ Alım Ekle</button>
+        <div style="font-size:20px;font-weight:900;font-family:'JetBrains Mono',monospace;color:${tamOdendi?'var(--green)':'var(--orange)'}">
+          ${kalanBorc.toLocaleString('tr-TR')} ₺
+        </div>
+        <div style="font-size:10px;color:var(--text-3)">Kalan Borç</div>
+        <div style="font-size:10px;color:var(--green);margin-top:2px">Ödenen: ${totalOdenen.toLocaleString('tr-TR')} ₺ / ${total.toLocaleString('tr-TR')} ₺</div>
       </div>
+    </div>
+
+    <!-- ÖDEME BUTONU -->
+    <div style="padding:0 14px 14px;display:flex;gap:8px">
+      ${!tamOdendi ? `
+        <button class="btn btn-green" style="flex:1;justify-content:center;font-size:13px;padding:11px;border-radius:14px"
+          onclick="openModal('addCreditorPayment',${c.id})">
+          💸 Ödeme Yap — Borç: <strong>${kalanBorc.toLocaleString('tr-TR')} ₺</strong>
+        </button>` : `
+        <div style="flex:1;background:var(--green-soft);border:1.5px solid var(--green-border);
+             border-radius:14px;padding:11px;text-align:center;font-weight:800;color:var(--green-dark);font-size:13px">
+          ✅ Tüm ödemeler tamamlandı
+        </div>`}
+      <button class="btn btn-outline btn-sm" style="flex-shrink:0" onclick="openModal('addCreditorTrans',${c.id})">＋ Alım Ekle</button>
     </div>
 
     <div class="detail-body">
@@ -1872,33 +1897,53 @@ function renderCreditorDetail(id){
               ${g.items.map(t=>{
                 const stogaEklendi=!!t.stoga_eklendi;
                 const iadeVar=Number(t.iade_qty||0)>0;
-                // İade var ve stoğa eklendi işaretliyse → tutarsız durum (iade bekliyor)
                 const iadeBekliyor=iadeVar&&!stogaEklendi;
+                const cpays=(t.creditor_payments||[]).sort((a,b)=>a.date.localeCompare(b.date));
+                const txOdenen=cpays.reduce((a,p)=>a+Number(p.amount),0);
+                const txKalan=Math.max(0,Number(t.total)-txOdenen);
+                const txTamOdendi=txKalan<=0;
                 return `
-                <div class="cred-grup-row ${stogaEklendi?'stoga-eklendi':''} ${iadeBekliyor?'iade-bekliyor':''}">
-                  <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text-3);width:78px;flex-shrink:0">${t.date}</div>
-                  <div style="flex:1;font-size:12px;color:var(--text-2);min-width:0">
-                    <div>${Number(t.qty).toLocaleString('tr-TR')} ${t.unit}
-                      <span style="color:var(--text-3)">× ${Number(t.price).toLocaleString('tr-TR')} ₺</span>
+                <div class="cred-grup-row ${stogaEklendi?'stoga-eklendi':''} ${iadeBekliyor?'iade-bekliyor':''}"
+                  style="flex-direction:column;gap:0;border-left:3px solid ${txTamOdendi?'var(--green)':iadeBekliyor?'var(--orange)':'var(--green-border)'}">
+                  <div style="display:flex;align-items:center;gap:6px;padding:2px 0">
+                    <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text-3);width:78px;flex-shrink:0">${t.date}</div>
+                    <div style="flex:1;font-size:12px;color:var(--text-2);min-width:0">
+                      <div>${Number(t.qty).toLocaleString('tr-TR')} ${t.unit}
+                        <span style="color:var(--text-3)">× ${Number(t.price).toLocaleString('tr-TR')} ₺</span>
+                      </div>
+                      ${iadeVar?`<div style="font-size:10px;font-weight:700;color:var(--orange);margin-top:1px">
+                        ↩ ${Number(t.iade_qty).toLocaleString('tr-TR')} ${t.unit} iade
+                        ${t.iade_date?'('+t.iade_date+')':''}
+                        ${!stogaEklendi?'<span style="color:var(--red)">— Stok bekleniyor</span>':''}
+                      </div>`:''}
                     </div>
-                    ${iadeVar?`
-                    <div style="font-size:10px;font-weight:700;color:var(--orange);margin-top:2px">
-                      ↩ ${Number(t.iade_qty).toLocaleString('tr-TR')} ${t.unit} iade
-                      ${t.iade_date?`<span style="font-weight:400;color:var(--text-3)">(${t.iade_date})</span>`:''}
-                      ${!stogaEklendi?'<span style="color:var(--red)"> — Stoğa eklenmeyi bekliyor</span>':''}
-                    </div>`:''}
+                    <div style="text-align:right;flex-shrink:0;margin-right:4px">
+                      <div style="font-size:12px;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--green-dark)">${Number(t.total).toLocaleString('tr-TR')} ₺</div>
+                      <div style="font-size:10px;font-weight:700;color:${txTamOdendi?'var(--green)':'var(--orange)'}">
+                        ${txTamOdendi?'✓ Ödendi':'Kalan: '+txKalan.toLocaleString('tr-TR')+' ₺'}
+                      </div>
+                    </div>
+                    <div style="display:flex;gap:3px;flex-shrink:0">
+                      ${!txTamOdendi?`<button class="stoga-toggle" style="font-size:10px;padding:3px 7px;border-color:var(--orange);color:var(--orange)"
+                        onclick="openModal('addCreditorTransPayment',${t.id});event.stopPropagation()">💸 Öde</button>`:''}
+                      <button class="stoga-toggle ${stogaEklendi?'on':''} ${iadeBekliyor?'warn':''}"
+                        title="${stogaEklendi?'Stoğa eklendi (geri al)':iadeVar?'İade stoğa eklendiyse işaretle':'Stoğa eklendi işaretle'}"
+                        onclick="toggleStogaEklendi(${t.id},${stogaEklendi?'false':'true'},${iadeVar});event.stopPropagation()">
+                        ${stogaEklendi?'📦':iadeBekliyor?'📦⚠️':'📦'}
+                      </button>
+                      <button class="pi-action-btn edit" title="Düzenle" onclick="openModal('editCreditorTrans',${t.id});event.stopPropagation()">✏️</button>
+                    </div>
                   </div>
-                  <div style="font-size:12px;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--green-dark);flex-shrink:0;margin-right:6px">
-                    ${Number(t.total).toLocaleString('tr-TR')} ₺
-                  </div>
-                  <button class="stoga-toggle ${stogaEklendi?'on':''} ${iadeBekliyor?'warn':''}"
-                    title="${stogaEklendi?'Stoğa eklendi (geri al)': iadeVar?'İade stoğa eklendiyse işaretle':'Stoğa eklendi olarak işaretle'}"
-                    onclick="toggleStogaEklendi(${t.id},${stogaEklendi?'false':'true'},${iadeVar});event.stopPropagation()">
-                    ${stogaEklendi?'📦 Eklendi': iadeBekliyor?'📦 İade Ekle':'📦 Ekle'}
-                  </button>
-                  <div style="display:flex;gap:3px;flex-shrink:0;margin-left:4px">
-                    <button class="pi-action-btn edit" title="Düzenle" onclick="openModal('editCreditorTrans',${t.id});event.stopPropagation()">✏️</button>
-                  </div>
+                  ${cpays.length?`
+                  <div style="margin-top:6px;padding:6px 8px;background:rgba(19,164,0,.05);border-radius:6px">
+                    <div style="font-size:10px;font-weight:700;color:var(--text-3);margin-bottom:4px;text-transform:uppercase;letter-spacing:.04em">Ödeme Geçmişi</div>
+                    ${cpays.map(p=>`
+                    <div style="display:flex;gap:8px;font-size:11px;padding:2px 0;border-bottom:1px solid rgba(19,164,0,.08)">
+                      <span style="font-family:'JetBrains Mono',monospace;color:var(--text-3);width:76px;flex-shrink:0">${p.date}</span>
+                      <span style="flex:1;color:var(--text-2)">${p.note||'—'}</span>
+                      <span style="font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--green-dark)">${Number(p.amount).toLocaleString('tr-TR')} ₺</span>
+                    </div>`).join('')}
+                  </div>`:''}
                 </div>`;
               }).join('')}
               <!-- Grup özet satırı -->
@@ -2035,6 +2080,52 @@ function openModal(type,id=null){
       <div class="form-group"><label>Tedarikçi Adı</label><input id="f-name" placeholder="Firma / Ad Soyad"/></div>
       <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">İptal</button><button class="btn btn-green" onclick="updateCreditor()">Kaydet</button></div>`,
 
+    addCreditorPayment:`<h3>💸 Ödeme Yap</h3>
+      <div id="cpi-ozet" style="background:var(--green-light);border:1px solid var(--green-border);border-radius:12px;padding:12px 14px;margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+          <span style="font-weight:700;color:var(--text-2)">Toplam Alım</span>
+          <span id="cpi-toplam" style="font-weight:900;font-family:'JetBrains Mono',monospace;color:var(--text)">—</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+          <span style="font-weight:700;color:var(--text-2)">Ödenen</span>
+          <span id="cpi-odenen" style="font-weight:900;font-family:'JetBrains Mono',monospace;color:var(--green)">—</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:15px;padding-top:8px;border-top:1px solid var(--green-border)">
+          <span style="font-weight:800">Kalan Borç</span>
+          <span id="cpi-kalan" style="font-weight:900;font-family:'JetBrains Mono',monospace;color:var(--orange)">—</span>
+        </div>
+      </div>
+      <div style="font-size:11px;font-weight:700;color:var(--text-3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em">
+        📋 Kalemler (eskiden yeniye öder)
+      </div>
+      <div id="cpi-kalemler" style="max-height:180px;overflow-y:auto;border:1px solid var(--green-border);border-radius:10px;margin-bottom:14px"></div>
+      <div class="form-group">
+        <label>Ödenen Tutar (₺)</label>
+        <input id="f-amount" type="number" placeholder="0" min="1" oninput="updateCreditorPayPreview()"/>
+        <div style="margin-top:6px"><button type="button" class="btn btn-outline btn-sm" style="width:100%;justify-content:center" onclick="setCreditorFullPayment()">Tamamını Öde</button></div>
+      </div>
+      <div id="cpi-preview" style="display:none;border-radius:10px;padding:9px 12px;margin-bottom:8px;font-size:12px;font-weight:700"></div>
+      <div class="form-group"><label>Ödeme Tarihi</label><input id="f-date" type="date" value="${today}"/></div>
+      <div class="form-group"><label>Not (opsiyonel)</label><input id="f-note" placeholder="EFT, nakit, kısmi..."/></div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="closeModal()">İptal</button>
+        <button class="btn btn-green" onclick="saveCreditorPayment()">💸 Ödemeyi Kaydet</button>
+      </div>`,
+
+    addCreditorTransPayment:`<h3>💸 Kalem Ödemesi</h3>
+      <div id="ctpi-bilgi" style="background:var(--green-light);border:1px solid var(--green-border);border-radius:12px;padding:12px 14px;margin-bottom:14px;font-size:13px;font-weight:700;color:var(--green-dark)">⏳ Yükleniyor...</div>
+      <div class="form-group">
+        <label>Ödenen Tutar (₺)</label>
+        <input id="f-amount" type="number" placeholder="0" min="1"/>
+        <div style="margin-top:6px"><button type="button" class="btn btn-outline btn-sm" style="width:100%;justify-content:center" onclick="setCreditorTransFullPayment()">Tamamını Öde</button></div>
+      </div>
+      <div class="form-group"><label>Ödeme Tarihi</label><input id="f-date" type="date" value="${today}"/></div>
+      <div class="form-group"><label>Not (opsiyonel)</label><input id="f-note" placeholder="EFT, nakit..."/></div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="closeModal()">İptal</button>
+        <button class="btn btn-green" onclick="saveCreditorTransPayment()">💸 Kaydet</button>
+      </div>`,
+
     addCreditorTrans:`<h3>📦 Alım Ekle</h3>
       <div class="form-group"><label>Ürün</label><input id="f-prod" placeholder="Ürün adı"/></div>
       <div class="form-row">
@@ -2159,6 +2250,63 @@ function openModal(type,id=null){
       set('f-date',tx.date);
       set('f-iade-qty',tx.iade_qty||0);
       if(tx.iade_date) set('f-iade-date',tx.iade_date);
+    },60);
+  }
+  // addCreditorPayment — tedarikçinin tüm kalemleri özeti
+  if(type==='addCreditorPayment'){
+    setTimeout(()=>{
+      const c=S.creditors.find(x=>x.id===id); if(!c) return;
+      const txs=c.creditor_transactions||[];
+      const totalBorc=txs.reduce((a,t)=>a+Number(t.total),0);
+      const totalOdenen=txs.flatMap(t=>t.creditor_payments||[]).reduce((a,p)=>a+Number(p.amount),0);
+      const kalan=Math.max(0,totalBorc-totalOdenen);
+      const set=(elId,val)=>{ const el=document.getElementById(elId); if(el) el.textContent=val; };
+      set('cpi-toplam', totalBorc.toLocaleString('tr-TR')+' ₺');
+      set('cpi-odenen', totalOdenen.toLocaleString('tr-TR')+' ₺');
+      set('cpi-kalan',  kalan.toLocaleString('tr-TR')+' ₺');
+      window._creditorKalan=kalan;
+      // Kalem listesi
+      const kalemEl=document.getElementById('cpi-kalemler');
+      if(kalemEl){
+        const acikKalemler=txs.filter(t=>{
+          const od=(t.creditor_payments||[]).reduce((a,p)=>a+Number(p.amount),0);
+          return Number(t.total)-od>0;
+        }).sort((a,b)=>a.date.localeCompare(b.date));
+        kalemEl.innerHTML=acikKalemler.length
+          ? acikKalemler.map(t=>{
+              const od=(t.creditor_payments||[]).reduce((a,p)=>a+Number(p.amount),0);
+              const txK=Math.max(0,Number(t.total)-od);
+              return `<div style="display:flex;gap:8px;padding:7px 10px;border-bottom:1px solid var(--green-border);font-size:12px">
+                <span style="font-family:'JetBrains Mono',monospace;color:var(--text-3);flex-shrink:0">${t.date}</span>
+                <span style="flex:1;font-weight:700">${t.product}</span>
+                <span style="font-weight:900;color:var(--orange);font-family:'JetBrains Mono',monospace">${txK.toLocaleString('tr-TR')} ₺</span>
+              </div>`;
+            }).join('')
+          : '<div style="padding:12px;text-align:center;color:var(--text-3);font-size:12px">Açık kalem yok</div>';
+      }
+    },60);
+  }
+  // addCreditorTransPayment — tek kalem ödemesi
+  if(type==='addCreditorTransPayment'){
+    setTimeout(()=>{
+      let tx=null, c=null;
+      for(const cr of S.creditors){
+        tx=(cr.creditor_transactions||[]).find(t=>t.id===id);
+        if(tx){c=cr;break;}
+      }
+      if(!tx) return;
+      const od=(tx.creditor_payments||[]).reduce((a,p)=>a+Number(p.amount),0);
+      const kalan=Math.max(0,Number(tx.total)-od);
+      window._creditorTransKalan=kalan;
+      const bilgi=document.getElementById('ctpi-bilgi');
+      if(bilgi) bilgi.innerHTML=`
+        <div style="font-size:12px;color:var(--text-3);margin-bottom:4px">${c?.name||''}</div>
+        <div style="font-size:14px;font-weight:900">${tx.product}</div>
+        <div style="font-size:12px;margin-top:4px;color:var(--text-2)">${tx.date} · ${Number(tx.qty).toLocaleString('tr-TR')} ${tx.unit} · Tutar: ${Number(tx.total).toLocaleString('tr-TR')} ₺</div>
+        <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--green-border);display:flex;justify-content:space-between">
+          <span style="font-size:12px;color:var(--green)">Ödenen: ${od.toLocaleString('tr-TR')} ₺</span>
+          <span style="font-size:13px;font-weight:900;color:var(--orange)">Kalan: ${kalan.toLocaleString('tr-TR')} ₺</span>
+        </div>`;
     },60);
   }
 }
@@ -2302,6 +2450,100 @@ async function saveDebtorTrans(){
   closeModal(); toast('✅ İşlem eklendi!'); loadDebtors();
 }
 
+// ══════════════════════════════════════
+//  VERECEKLer ÖDEME SİSTEMİ
+// ══════════════════════════════════════
+
+function setCreditorFullPayment(){
+  const inp=document.getElementById('f-amount');
+  if(inp && window._creditorKalan){ inp.value=window._creditorKalan; updateCreditorPayPreview(); }
+}
+
+function setCreditorTransFullPayment(){
+  const inp=document.getElementById('f-amount');
+  if(inp && window._creditorTransKalan) inp.value=window._creditorTransKalan;
+}
+
+function updateCreditorPayPreview(){
+  const amount=+document.getElementById('f-amount')?.value||0;
+  const kalan=window._creditorKalan||0;
+  const prev=document.getElementById('cpi-preview');
+  if(!prev) return;
+  if(amount<=0){ prev.style.display='none'; return; }
+  prev.style.display='block';
+  if(amount>=kalan){
+    prev.style.cssText='background:#f0faf0;border:1px solid #c8e6c9;border-radius:10px;padding:9px 12px;margin-bottom:8px;font-size:12px;font-weight:700;color:var(--green-dark)';
+    prev.textContent=`✅ Tüm borç kapatılacak (${kalan.toLocaleString('tr-TR')} ₺)`;
+  } else {
+    prev.style.cssText='background:#fff8e1;border:1px solid #ffe082;border-radius:10px;padding:9px 12px;margin-bottom:8px;font-size:12px;font-weight:700;color:var(--orange)';
+    prev.textContent=`Ödeme sonrası kalan borç: ${(kalan-amount).toLocaleString('tr-TR')} ₺`;
+  }
+}
+
+// Toplam ödeme — FIFO: eskiden yeniye kalem kalem düşer
+async function saveCreditorPayment(){
+  const amount=+fv('f-amount'), date=fv('f-date'), note=fv('f-note');
+  const creditorId=_mId;
+  if(!amount||amount<=0){ toast('⚠️ Geçerli bir tutar girin',true); return; }
+
+  const c=S.creditors.find(x=>x.id===creditorId);
+  if(!c){ toast('⚠️ Tedarikçi bulunamadı',true); return; }
+
+  // Açık kalemleri eskiden yeniye sırala (FIFO)
+  const txs=[...(c.creditor_transactions||[])].sort((a,b)=>a.date.localeCompare(b.date));
+  let kalanOdenecek=amount;
+  const kayitlar=[];
+
+  for(const t of txs){
+    if(kalanOdenecek<=0) break;
+    const od=(t.creditor_payments||[]).reduce((a,p)=>a+Number(p.amount),0);
+    const txKalan=Math.max(0,Number(t.total)-od);
+    if(txKalan<=0) continue;
+    const buKalem=Math.min(kalanOdenecek, txKalan);
+    kayitlar.push({ creditor_id:creditorId, transaction_id:t.id, amount:buKalem, date, note:note||null });
+    kalanOdenecek-=buKalem;
+  }
+
+  if(!kayitlar.length){ toast('⚠️ Açık kalem bulunamadı',true); return; }
+
+  showLoad();
+  const {error}=await db.from('creditor_payments').insert(kayitlar);
+  hideLoad();
+  if(error){ toast('❌ '+error.message,true); return; }
+
+  closeModal();
+  toast(`✅ ${amount.toLocaleString('tr-TR')} ₺ ödeme kaydedildi! (${kayitlar.length} kaleme dağıtıldı)`);
+  await loadCreditors();
+  if(S.activeCreditorId===creditorId) renderCreditorDetail(creditorId);
+}
+
+// Tek kalem ödemesi
+async function saveCreditorTransPayment(){
+  const amount=+fv('f-amount'), date=fv('f-date'), note=fv('f-note');
+  if(!amount||amount<=0){ toast('⚠️ Geçerli bir tutar girin',true); return; }
+
+  const kalan=window._creditorTransKalan||0;
+  if(amount>kalan){ toast(`⚠️ Girilen tutar kalemden fazla (kalan: ${kalan.toLocaleString('tr-TR')} ₺)`,true); return; }
+
+  // transaction_id = _mId, creditor_id'yi bul
+  let creditorId=null;
+  for(const c of S.creditors){
+    if((c.creditor_transactions||[]).find(t=>t.id===_mId)){ creditorId=c.id; break; }
+  }
+
+  showLoad();
+  const {error}=await db.from('creditor_payments').insert({
+    creditor_id:creditorId, transaction_id:_mId, amount, date, note:note||null
+  });
+  hideLoad();
+  if(error){ toast('❌ '+error.message,true); return; }
+
+  closeModal();
+  toast(`✅ ${amount.toLocaleString('tr-TR')} ₺ kalem ödemesi kaydedildi!`);
+  await loadCreditors();
+  if(S.activeCreditorId===creditorId) renderCreditorDetail(creditorId);
+}
+
 async function saveCreditor(){
   const name=fv('f-name');
   if(!name){toast('⚠️ İsim girin',true);return;}
@@ -2332,7 +2574,12 @@ async function deleteCreditor(id, name, txSayi){
     if(!confirm(`"${name}" tedarikçisini silmek istediğinize emin misiniz?`)) return;
   }
   showLoad();
-  await db.from('creditor_transactions').delete().eq('creditor_id',id);
+  // Önce ödemeleri, sonra işlemleri, sonra tedarikçiyi sil
+  const txIds=(S.creditors.find(x=>x.id===id)?.creditor_transactions||[]).map(t=>t.id);
+  if(txIds.length){
+    await db.from('creditor_payments').delete().in('transaction_id',txIds);
+    await db.from('creditor_transactions').delete().eq('creditor_id',id);
+  }
   const {error}=await db.from('creditors').delete().eq('id',id);
   hideLoad();
   if(error){toast('❌ '+error.message,true);return;}
