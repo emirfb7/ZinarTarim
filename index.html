@@ -1450,26 +1450,160 @@ async function tamYedekAl(){
       XLSX.utils.book_append_sheet(wb,ws,'📋 Özet');
     }
 
-    // ─── 2. STOK LİSTESİ (Kalem kalem) ─────────────────────────
+    // ─── 2. STOK LİSTESİ — Kategoriye Göre Gruplu ───────────────
     {
       const ws={};
-      const basliklar=['Kategori','Alt Kategori','Ürün Adı','Stok','Birim',
-        'Satış Fiyatı (₺)','Min. Stok','Durum','Son Giriş','Son Çıkış'];
-      baslikSatiri(ws,0,basliklar,'1B5E20');
+      let r=0;
 
-      (products||[]).forEach((p,i)=>{
-        const r=i+1;
-        const durum=p.stock<=0?'❌ TÜKENDİ':p.stock<=p.min_stock?'⚠️ AZ STOK':'✅ YETERLİ';
-        const bg=p.stock<=0?'FFCDD2':p.stock<=p.min_stock?'FFF9C4':null;
-        [p.cat,p.sub,p.name,p.stock,p.unit,p.price,p.min_stock,durum,p.last_in||'—',p.last_out||'—']
-          .forEach((v,c)=>{
-            const addr=XLSX.utils.encode_cell({r,c});
-            ws[addr]={v:v??'',t:typeof v==='number'?'n':'s'};
-            if(bg) ws[addr].s={fill:{fgColor:{rgb:bg.replace('#','')}}};
-          });
+      // Başlık bandı
+      bas(ws,r,0,'STOK LİSTESİ — KATEGORİ BAZLI',true,'0D7A00');
+      for(let c=1;c<=11;c++){
+        const a=XLSX.utils.encode_cell({r,c});
+        ws[a]={v:'',t:'s',s:{fill:{fgColor:{rgb:'0D7A00'}}}};
+      }
+      r++;
+      bas(ws,r,0,'Yedek Tarihi: '+simdi); r+=2;
+
+      // Sütun başlıkları
+      const kolonlar=['Ürün Adı','Mevcut Stok','Birim','Satış Fiyatı (₺)',
+        'Stok Değeri (₺)','Min. Stok','Durum','Son Giriş','Son Çıkış',
+        'Toplam Satılan','Toplam Satış Tutarı (₺)'];
+      baslikSatiri(ws,r,['','...KATEGORİ / ALT KATEGORİ / ÜRÜN...','','','','','','','','','',''],'1B5E20');
+      r++;
+      baslikSatiri(ws,r,['#',...kolonlar],'2E7D32');
+      r++;
+
+      // Kategori → alt kategori → ürünler gruplandır
+      const katMap={};
+      (products||[]).forEach(p=>{
+        if(!katMap[p.cat]) katMap[p.cat]={};
+        if(!katMap[p.cat][p.sub]) katMap[p.cat][p.sub]=[];
+        katMap[p.cat][p.sub].push(p);
       });
-      setRef(ws,(products||[]).length,basliklar.length-1);
-      ws['!cols']=[{wch:12},{wch:16},{wch:35},{wch:8},{wch:7},{wch:16},{wch:10},{wch:14},{wch:12},{wch:12}];
+
+      // Her ürünün satış istatistiklerini hesapla
+      const satisStat={};
+      (sales||[]).forEach(s=>{
+        if(!satisStat[s.product_name]){satisStat[s.product_name]={qty:0,total:0};}
+        satisStat[s.product_name].qty+=Number(s.qty);
+        satisStat[s.product_name].total+=Number(s.total);
+      });
+
+      let siraNo=1;
+
+      const katRenkler={
+        'Gübre':   {bg:'E8F5E9',hbg:'1B5E20'},
+        'İlaç':    {bg:'E3F2FD',hbg:'0D47A1'},
+        'Tohum':   {bg:'FFF8E1',hbg:'E65100'},
+        'Haşere':  {bg:'FCE4EC',hbg:'880E4F'},
+        'Zehir':   {bg:'EDE7F6',hbg:'4A148C'},
+        'Ekipman': {bg:'E0F7FA',hbg:'006064'},
+      };
+
+      Object.keys(katMap).sort().forEach(kat=>{
+        const renkler=katRenkler[kat]||{bg:'F5F5F5',hbg:'424242'};
+        const katUrunler=Object.values(katMap[kat]).flat();
+        const katToplamStok=katUrunler.reduce((a,p)=>a+Number(p.stock),0);
+        const katToplamDeger=katUrunler.reduce((a,p)=>a+Number(p.stock)*Number(p.price),0);
+        const katTukenmiş=katUrunler.filter(p=>p.stock<=0).length;
+        const katAzStok=katUrunler.filter(p=>p.stock>0&&p.stock<=p.min_stock).length;
+
+        // Kategori başlık satırı
+        const katBaslik=`📁 ${kat.toUpperCase()} (${katUrunler.length} ürün)`;
+        bas(ws,r,0,katBaslik,true,renkler.hbg.replace('#',''));
+        // renkli span
+        for(let c=1;c<=11;c++){
+          const a=XLSX.utils.encode_cell({r,c});
+          ws[a]={v:c===1?`${katUrunler.length} ürün  |  Stok değeri: ${katToplamDeger.toLocaleString('tr-TR')} ₺  |  Tükenmiş: ${katTukenmiş}  |  Az Stok: ${katAzStok}`:''
+            ,t:'s',s:{font:{bold:true,color:{rgb:'FFFFFF'}},fill:{fgColor:{rgb:renkler.hbg.replace('#','')}}}};
+        }
+        r++;
+
+        Object.keys(katMap[kat]).sort().forEach(sub=>{
+          const subUrunler=katMap[kat][sub];
+          const subToplamDeger=subUrunler.reduce((a,p)=>a+Number(p.stock)*Number(p.price),0);
+
+          // Alt kategori başlık satırı
+          const subBaslik=`  └─ ${sub} (${subUrunler.length})`;
+          bas(ws,r,0,subBaslik,true,renkler.bg.replace('#',''));
+          for(let c=1;c<=11;c++){
+            const a=XLSX.utils.encode_cell({r,c});
+            ws[a]={v:c===1?`${subUrunler.length} ürün  |  Toplam stok değeri: ${subToplamDeger.toLocaleString('tr-TR')} ₺`:'',
+              t:'s',s:{fill:{fgColor:{rgb:renkler.bg.replace('#','')}},font:{bold:true,color:{rgb:'1B5E20'}}}};
+          }
+          r++;
+
+          // Ürün satırları
+          subUrunler.sort((a,b)=>a.name.localeCompare(b.name,'tr')).forEach(p=>{
+            const durum=p.stock<=0?'❌ TÜKENDİ':p.stock<=p.min_stock?'⚠️ AZ STOK':'✅ YETERLİ';
+            const satBg=p.stock<=0?'FFCDD2':p.stock<=p.min_stock?'FFF9C4':null;
+            const stokDegeri=Number(p.stock)*Number(p.price);
+            const satIstat=satisStat[p.name]||{qty:0,total:0};
+            const satirVeri=[
+              siraNo,
+              p.name,
+              p.stock,
+              p.unit,
+              p.price,
+              stokDegeri,
+              p.min_stock,
+              durum,
+              p.last_in||'—',
+              p.last_out||'—',
+              satIstat.qty||0,
+              satIstat.total||0,
+            ];
+            satirVeri.forEach((v,c)=>{
+              const addr=XLSX.utils.encode_cell({r,c});
+              ws[addr]={v:v??'',t:typeof v==='number'?'n':'s'};
+              if(satBg) ws[addr].s={fill:{fgColor:{rgb:satBg}}};
+            });
+            siraNo++; r++;
+          });
+
+          // Alt kategori toplam satırı
+          const subToplamStok=subUrunler.reduce((a,p)=>a+Number(p.stock),0);
+          bas(ws,r,0,'    TOPLAM',true,'C8E6C9');
+          bas(ws,r,1,'',false,'C8E6C9');
+          bas(ws,r,2,subToplamStok,true,'C8E6C9');
+          bas(ws,r,5,subToplamDeger,true,'C8E6C9');
+          for(let c=3;c<=11;c++){
+            if(c===2||c===5) continue;
+            const a=XLSX.utils.encode_cell({r,c});
+            ws[a]={v:'',t:'s',s:{fill:{fgColor:{rgb:'C8E6C9'}}}};
+          }
+          r++;
+        });
+
+        // Kategori toplam satırı
+        bas(ws,r,0,`${kat} GENEL TOPLAM`,true,'A5D6A7');
+        bas(ws,r,2,katToplamStok,true,'A5D6A7');
+        bas(ws,r,5,katToplamDeger,true,'A5D6A7');
+        for(let c=1;c<=11;c++){
+          if(c===2||c===5) continue;
+          const a=XLSX.utils.encode_cell({r,c});
+          ws[a]={v:'',t:'s',s:{fill:{fgColor:{rgb:'A5D6A7'}}}};
+        }
+        r+=2;
+      });
+
+      // GENEL TOPLAM
+      const genToplamDeger=(products||[]).reduce((a,p)=>a+Number(p.stock)*Number(p.price),0);
+      const genToplamSatis=(sales||[]).reduce((a,s)=>a+Number(s.total),0);
+      bas(ws,r,0,'📊 GENEL TOPLAM',true,'1B5E20');
+      bas(ws,r,1,`${(products||[]).length} farklı ürün`,true,'1B5E20');
+      bas(ws,r,5,genToplamDeger,true,'1B5E20');
+      bas(ws,r,11,genToplamSatis,true,'1B5E20');
+      for(let c=2;c<=11;c++){
+        if(c===5||c===11) continue;
+        const a=XLSX.utils.encode_cell({r,c});
+        ws[a]={v:'',t:'s',s:{fill:{fgColor:{rgb:'1B5E20'}}}};
+      }
+
+      setRef(ws,r,11);
+      ws['!cols']=[{wch:5},{wch:38},{wch:10},{wch:7},{wch:16},{wch:18},{wch:10},{wch:14},{wch:12},{wch:12},{wch:14},{wch:20}];
+      // Satır yükseklikleri
+      ws['!rows']=[{hpt:20},{hpt:16},{hpt:16}];
       XLSX.utils.book_append_sheet(wb,ws,'🌿 Stok Listesi');
     }
 
