@@ -1352,8 +1352,8 @@ async function tamYedekAl(){
   btn.disabled = true;
 
   try{
-    // Tüm tabloları paralel çek
     btn.innerHTML = '⏳ Tablolar yükleniyor...';
+
     const [
       {data: products},
       {data: sales},
@@ -1364,113 +1364,284 @@ async function tamYedekAl(){
       {data: creditor_transactions},
       {data: creditor_payments},
     ] = await Promise.all([
-      db.from('products').select('*').order('name'),
-      db.from('sales').select('*').order('sale_date', {ascending:false}),
+      db.from('products').select('*').order('cat').order('name'),
+      db.from('sales').select('*').order('sale_date',{ascending:false}).order('sale_time',{ascending:false}),
       db.from('debtors').select('*').order('name'),
-      db.from('debtor_transactions').select('*').order('date', {ascending:false}),
-      db.from('debt_payments').select('*').order('date', {ascending:false}),
+      db.from('debtor_transactions').select('*').order('debtor_id').order('date',{ascending:false}),
+      db.from('debt_payments').select('*').order('transaction_id').order('date',{ascending:false}),
       db.from('creditors').select('*').order('name'),
-      db.from('creditor_transactions').select('*').order('date', {ascending:false}),
-      db.from('creditor_payments').select('*').order('date', {ascending:false}),
+      db.from('creditor_transactions').select('*').order('creditor_id').order('date',{ascending:false}),
+      db.from('creditor_payments').select('*').order('transaction_id').order('date',{ascending:false}),
     ]);
 
-    btn.innerHTML = '⏳ Excel oluşturuluyor...';
+    btn.innerHTML = '⏳ Excel hazırlanıyor...';
 
     const wb = XLSX.utils.book_new();
     const simdi = new Date().toLocaleString('tr-TR');
+    const tarihDosya = new Date().toISOString().slice(0,10);
 
-    // Yardımcı: obje dizisini sayfaya ekle
-    function ekSayfa(veri, sayfaAdi, kolonSirasi=null){
-      if(!veri || veri.length === 0){
-        const ws = XLSX.utils.aoa_to_sheet([['Veri yok']]);
-        XLSX.utils.book_append_sheet(wb, ws, sayfaAdi);
-        return;
-      }
-      // Kolon sırasını belirle
-      const kolonlar = kolonSirasi || Object.keys(veri[0]);
-      const satirlar = veri.map(r => kolonlar.map(k => r[k] ?? ''));
-      const ws = XLSX.utils.aoa_to_sheet([kolonlar, ...satirlar]);
-
-      // Başlık satırı kalın
-      const range = XLSX.utils.decode_range(ws['!ref']);
-      for(let c = range.s.c; c <= range.e.c; c++){
-        const hucre = XLSX.utils.encode_cell({r:0, c});
-        if(!ws[hucre]) continue;
-        ws[hucre].s = { font:{bold:true}, fill:{fgColor:{rgb:'C8E6C9'}} };
-      }
-      // Kolon genişlikleri
-      ws['!cols'] = kolonlar.map(k=>({wch: Math.max(k.length+2, 14)}));
-      XLSX.utils.book_append_sheet(wb, ws, sayfaAdi);
+    // ─── Yardımcı fonksiyonlar ────────────────────────────────────
+    function bas(ws, r, c, val, bold=false, bg=null, numFmt=null){
+      const addr = XLSX.utils.encode_cell({r,c});
+      ws[addr] = {v: val, t: typeof val==='number'?'n':'s'};
+      if(bold||bg||numFmt) ws[addr].s = {
+        font:{bold},
+        fill: bg?{fgColor:{rgb:bg}}:undefined,
+        numFmt: numFmt||undefined,
+        alignment:{vertical:'center'}
+      };
     }
 
-    // ── Özet Sayfası ──
-    const kalanAlacak = (debtor_transactions||[]).reduce((a,t)=>a+Number(t.total),0)
-      - (debt_payments||[]).reduce((a,p)=>a+Number(p.amount),0);
-    const kalanVerecek = (creditor_transactions||[]).reduce((a,t)=>a+Number(t.total),0)
-      - (creditor_payments||[]).reduce((a,p)=>a+Number(p.amount),0);
-    const toplamSatis = (sales||[]).reduce((a,s)=>a+Number(s.total),0);
+    function baslikSatiri(ws, r, basliklar, bg='1B5E20', fg='FFFFFF'){
+      basliklar.forEach((b,c)=>{
+        const addr=XLSX.utils.encode_cell({r,c});
+        ws[addr]={v:b,t:'s',s:{font:{bold:true,color:{rgb:fg}},fill:{fgColor:{rgb:bg}},alignment:{horizontal:'center',vertical:'center'}}};
+      });
+    }
 
-    const ozet = XLSX.utils.aoa_to_sheet([
-      ['TARIM STOK TAKİP — TAM VERİ YEDEĞİ'],
-      ['Yedek Tarihi:', simdi],
-      [],
-      ['TABLO', 'KAYIT SAYISI'],
-      ['Ürünler (Stok)',        (products||[]).length],
-      ['Satışlar',              (sales||[]).length],
-      ['Alacaklı Kişiler',     (debtors||[]).length],
-      ['Alacak İşlemleri',     (debtor_transactions||[]).length],
-      ['Alacak Ödemeleri',     (debt_payments||[]).length],
-      ['Tedarikçiler',         (creditors||[]).length],
-      ['Tedarikçi Alımları',   (creditor_transactions||[]).length],
-      ['Tedarikçi Ödemeleri',  (creditor_payments||[]).length],
-      [],
-      ['ÖZET BİLGİ', ''],
-      ['Toplam Satış Tutarı',  toplamSatis.toLocaleString('tr-TR') + ' ₺'],
-      ['Toplam Alacak (Kalan)', Math.max(0,kalanAlacak).toLocaleString('tr-TR') + ' ₺'],
-      ['Toplam Verecek (Kalan)',Math.max(0,kalanVerecek).toLocaleString('tr-TR') + ' ₺'],
-    ]);
-    ozet['!cols'] = [{wch:30},{wch:25}];
-    XLSX.utils.book_append_sheet(wb, ozet, '📋 Özet');
+    function setRef(ws, maxR, maxC){
+      ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:maxR,c:maxC}});
+    }
 
-    // ── Tablo Sayfaları ──
-    ekSayfa(products,              '🌿 Ürünler',
-      ['id','name','cat','sub','stock','unit','price','min_stock','last_in','last_out']);
+    // ─── 1. ÖZET ────────────────────────────────────────────────
+    {
+      const ws = {};
+      const toplamSatis=(sales||[]).reduce((a,s)=>a+Number(s.total),0);
+      const toplamBorc=(debtor_transactions||[]).reduce((a,t)=>a+Number(t.total),0);
+      const toplamOdenenBorc=(debt_payments||[]).reduce((a,p)=>a+Number(p.amount),0);
+      const kalanAlacak=Math.max(0,toplamBorc-toplamOdenenBorc);
+      const toplamAlim=(creditor_transactions||[]).reduce((a,t)=>a+Number(t.total),0);
+      const toplamOdenenAlim=(creditor_payments||[]).reduce((a,p)=>a+Number(p.amount),0);
+      const kalanVerecek=Math.max(0,toplamAlim-toplamOdenenAlim);
+      const azStok=(products||[]).filter(p=>p.stock<=p.min_stock).length;
 
-    ekSayfa(sales,                 '🛒 Satışlar',
-      ['id','sale_date','sale_time','product_name','cat','qty','unit','price','total']);
+      let r=0;
+      bas(ws,r,0,'TARIM STOK TAKİP — VERİ YEDEĞİ',true,'0D7A00'); bas(ws,r,1,'',false,'0D7A00');
+      r++; bas(ws,r,0,'Yedek Tarihi'); bas(ws,r,1,simdi);
+      r++; bas(ws,r,0,'Toplam Kayıt'); bas(ws,r,1,
+        (products||[]).length+(sales||[]).length+(debtor_transactions||[]).length+(creditor_transactions||[]).length);
+      r+=2;
 
-    ekSayfa(debtors,               '💳 Alacaklılar',
-      ['id','name','created_at']);
+      baslikSatiri(ws,r,['BÖLÜM','DEĞER / TUTAR'],'2E7D32');
+      r++;
+      const satirlar=[
+        ['📦 Stokta Ürün Çeşidi', (products||[]).length],
+        ['⚠️ Az Stokta Ürün', azStok],
+        ['🛒 Toplam Satış İşlemi', (sales||[]).length],
+        ['💰 Toplam Satış Tutarı', toplamSatis.toLocaleString('tr-TR')+' ₺'],
+        ['',''],
+        ['💳 Alacaklı Kişi Sayısı', (debtors||[]).length],
+        ['💳 Toplam Alacak Tutarı', toplamBorc.toLocaleString('tr-TR')+' ₺'],
+        ['💳 Tahsil Edilen', toplamOdenenBorc.toLocaleString('tr-TR')+' ₺'],
+        ['💳 KAlAN ALACAK', kalanAlacak.toLocaleString('tr-TR')+' ₺'],
+        ['',''],
+        ['📦 Tedarikçi Sayısı', (creditors||[]).length],
+        ['📦 Toplam Alım Tutarı', toplamAlim.toLocaleString('tr-TR')+' ₺'],
+        ['📦 Ödenen', toplamOdenenAlim.toLocaleString('tr-TR')+' ₺'],
+        ['📦 KALAN BORÇ', kalanVerecek.toLocaleString('tr-TR')+' ₺'],
+      ];
+      satirlar.forEach(([k,v],i)=>{
+        const bg = k.includes('KALAN')?'FFF9C4':k===''?null:(i%2===0?'F1F8E9':null);
+        bas(ws,r+i,0,k,k.includes('KALAN'),bg||undefined);
+        bas(ws,r+i,1,v,k.includes('KALAN'),bg||undefined);
+      });
+      setRef(ws,r+satirlar.length,1);
+      ws['!cols']=[{wch:35},{wch:25}];
+      XLSX.utils.book_append_sheet(wb,ws,'📋 Özet');
+    }
 
-    ekSayfa(debtor_transactions,   '💳 Alacak İşlemleri',
-      ['id','debtor_id','date','product','qty','unit','price','total','paid']);
+    // ─── 2. STOK LİSTESİ (Kalem kalem) ─────────────────────────
+    {
+      const ws={};
+      const basliklar=['Kategori','Alt Kategori','Ürün Adı','Stok','Birim',
+        'Satış Fiyatı (₺)','Min. Stok','Durum','Son Giriş','Son Çıkış'];
+      baslikSatiri(ws,0,basliklar,'1B5E20');
 
-    ekSayfa(debt_payments,         '💳 Alacak Ödemeleri',
-      ['id','debtor_id','transaction_id','date','amount','note']);
+      (products||[]).forEach((p,i)=>{
+        const r=i+1;
+        const durum=p.stock<=0?'❌ TÜKENDİ':p.stock<=p.min_stock?'⚠️ AZ STOK':'✅ YETERLİ';
+        const bg=p.stock<=0?'FFCDD2':p.stock<=p.min_stock?'FFF9C4':null;
+        [p.cat,p.sub,p.name,p.stock,p.unit,p.price,p.min_stock,durum,p.last_in||'—',p.last_out||'—']
+          .forEach((v,c)=>{
+            const addr=XLSX.utils.encode_cell({r,c});
+            ws[addr]={v:v??'',t:typeof v==='number'?'n':'s'};
+            if(bg) ws[addr].s={fill:{fgColor:{rgb:bg.replace('#','')}}};
+          });
+      });
+      setRef(ws,(products||[]).length,basliklar.length-1);
+      ws['!cols']=[{wch:12},{wch:16},{wch:35},{wch:8},{wch:7},{wch:16},{wch:10},{wch:14},{wch:12},{wch:12}];
+      XLSX.utils.book_append_sheet(wb,ws,'🌿 Stok Listesi');
+    }
 
-    ekSayfa(creditors,             '📦 Tedarikçiler',
-      ['id','name','created_at']);
+    // ─── 3. SATIŞ GEÇMİŞİ ────────────────────────────────────────
+    {
+      const ws={};
+      const basliklar=['Tarih','Saat','Ürün Adı','Kategori','Miktar','Birim','Birim Fiyat (₺)','Toplam (₺)'];
+      baslikSatiri(ws,0,basliklar,'1565C0');
 
-    ekSayfa(creditor_transactions, '📦 Tedarikçi Alımları',
-      ['id','creditor_id','date','product','qty','unit','price','total',
-       'iade_qty','iade_date','stoga_eklendi']);
+      (sales||[]).forEach((s,i)=>{
+        const r=i+1;
+        [s.sale_date,s.sale_time||'—',s.product_name,s.cat,s.qty,s.unit,s.price,s.total]
+          .forEach((v,c)=>{
+            const addr=XLSX.utils.encode_cell({r,c});
+            ws[addr]={v:v??'',t:typeof v==='number'?'n':'s'};
+          });
+      });
+      // TOPLAM satırı
+      const totR=(sales||[]).length+2;
+      bas(ws,totR,0,'GENEL TOPLAM',true,'E8F5E9');
+      bas(ws,totR,7,(sales||[]).reduce((a,s)=>a+Number(s.total),0),true,'E8F5E9');
+      setRef(ws,totR,basliklar.length-1);
+      ws['!cols']=[{wch:12},{wch:8},{wch:35},{wch:12},{wch:8},{wch:7},{wch:16},{wch:14}];
+      XLSX.utils.book_append_sheet(wb,ws,'🛒 Satış Geçmişi');
+    }
 
-    ekSayfa(creditor_payments,     '📦 Tedarikçi Ödemeleri',
-      ['id','creditor_id','transaction_id','date','amount','note']);
+    // ─── 4. ALACAKLAR (Kişi + işlem + ödeme birleşik) ───────────
+    {
+      const ws={};
+      const basliklar=['Kişi Adı','İşlem Tarihi','Ürün','Miktar','Birim',
+        'Birim Fiyat (₺)','İşlem Tutarı (₺)','Ödenen (₺)','Kalan (₺)','Durum',
+        'Ödeme Tarihleri','Ödeme Notları'];
+      baslikSatiri(ws,0,basliklar,'B71C1C');
+      let r=1;
+
+      (debtors||[]).forEach(d=>{
+        const dtxs=(debtor_transactions||[]).filter(t=>t.debtor_id===d.id)
+          .sort((a,b)=>a.date.localeCompare(b.date));
+        const topBorc=dtxs.reduce((a,t)=>a+Number(t.total),0);
+        const topOdenen=(debt_payments||[])
+          .filter(p=>dtxs.find(t=>t.id===p.transaction_id))
+          .reduce((a,p)=>a+Number(p.amount),0);
+        const topKalan=Math.max(0,topBorc-topOdenen);
+
+        // Kişi başlık satırı
+        bas(ws,r,0,d.name,true,'FFCCBC');
+        bas(ws,r,6,topBorc,true,'FFCCBC');
+        bas(ws,r,7,topOdenen,true,'FFCCBC');
+        bas(ws,r,8,topKalan,true,'FFCCBC');
+        bas(ws,r,9,topKalan<=0?'✅ TAM ÖDENDİ':'❌ BORÇ VAR',true,'FFCCBC');
+        r++;
+
+        if(dtxs.length===0){
+          bas(ws,r,1,'— İşlem yok —',false,'FFF8E1');
+          r++;
+        } else {
+          dtxs.forEach(t=>{
+            const pays=(debt_payments||[]).filter(p=>p.transaction_id===t.id)
+              .sort((a,b)=>a.date.localeCompare(b.date));
+            const txOdenen=pays.reduce((a,p)=>a+Number(p.amount),0);
+            const txKalan=Math.max(0,Number(t.total)-txOdenen);
+            const tamOdendi=txKalan<=0;
+            const bg=tamOdendi?'F1F8E9':'FFF9C4';
+            const odTarihler=pays.map(p=>p.date).join(', ')||'—';
+            const odNotlar=pays.map(p=>p.note||'').filter(Boolean).join(', ')||'—';
+
+            [d.name,t.date,t.product,t.qty,t.unit,t.price,t.total,txOdenen,txKalan,
+              tamOdendi?'✅ Ödendi':'⏳ Bekliyor',odTarihler,odNotlar]
+              .forEach((v,c)=>{
+                const addr=XLSX.utils.encode_cell({r,c});
+                ws[addr]={v:v??'',t:typeof v==='number'?'n':'s',
+                  s:{fill:{fgColor:{rgb:bg}}}};
+              });
+            r++;
+          });
+        }
+        r++; // kişiler arası boşluk
+      });
+
+      setRef(ws,r,basliklar.length-1);
+      ws['!cols']=[{wch:20},{wch:12},{wch:28},{wch:8},{wch:7},{wch:14},{wch:16},{wch:14},{wch:12},{wch:14},{wch:22},{wch:22}];
+      XLSX.utils.book_append_sheet(wb,ws,'💳 Alacaklar Detay');
+    }
+
+    // ─── 5. VERECEKler (Tedarikçi + alım + ödeme birleşik) ──────
+    {
+      const ws={};
+      const basliklar=['Tedarikçi','Alım Tarihi','Ürün','Miktar','Birim',
+        'Birim Fiyat (₺)','Alım Tutarı (₺)','İade Miktarı','İade Tarihi',
+        'Ödenen (₺)','Kalan Borç (₺)','Stoğa Eklendi','Ödeme Tarihleri','Ödeme Notları'];
+      baslikSatiri(ws,0,basliklar,'4A148C');
+      let r=1;
+
+      (creditors||[]).forEach(c=>{
+        const ctxs=(creditor_transactions||[]).filter(t=>t.creditor_id===c.id)
+          .sort((a,b)=>a.date.localeCompare(b.date));
+        const topAlim=ctxs.reduce((a,t)=>a+Number(t.total),0);
+        const topOdenen=(creditor_payments||[])
+          .filter(p=>ctxs.find(t=>t.id===p.transaction_id))
+          .reduce((a,p)=>a+Number(p.amount),0);
+        const topKalan=Math.max(0,topAlim-topOdenen);
+
+        // Tedarikçi başlık satırı
+        bas(ws,r,0,c.name,true,'E1BEE7');
+        bas(ws,r,6,topAlim,true,'E1BEE7');
+        bas(ws,r,9,topOdenen,true,'E1BEE7');
+        bas(ws,r,10,topKalan,true,'E1BEE7');
+        bas(ws,r,11,topKalan<=0?'✅ ÖDENDİ':'❌ BORÇ VAR',true,'E1BEE7');
+        r++;
+
+        if(ctxs.length===0){
+          bas(ws,r,1,'— Alım yok —',false,'FFF8E1');
+          r++;
+        } else {
+          ctxs.forEach(t=>{
+            const pays=(creditor_payments||[]).filter(p=>p.transaction_id===t.id)
+              .sort((a,b)=>a.date.localeCompare(b.date));
+            const txOdenen=pays.reduce((a,p)=>a+Number(p.amount),0);
+            const txKalan=Math.max(0,Number(t.total)-txOdenen);
+            const tamOdendi=txKalan<=0;
+            const bg=tamOdendi?'F3E5F5':'FFF9C4';
+            const odTarihler=pays.map(p=>p.date).join(', ')||'—';
+            const odNotlar=pays.map(p=>p.note||'').filter(Boolean).join(', ')||'—';
+
+            [c.name,t.date,t.product,t.qty,t.unit,t.price,t.total,
+              t.iade_qty||0,t.iade_date||'—',txOdenen,txKalan,
+              t.stoga_eklendi?'✅ Evet':'❌ Hayır',odTarihler,odNotlar]
+              .forEach((v,c2)=>{
+                const addr=XLSX.utils.encode_cell({r,c:c2});
+                ws[addr]={v:v??'',t:typeof v==='number'?'n':'s',
+                  s:{fill:{fgColor:{rgb:bg}}}};
+              });
+            r++;
+          });
+        }
+        r++;
+      });
+
+      setRef(ws,r,basliklar.length-1);
+      ws['!cols']=[{wch:20},{wch:12},{wch:28},{wch:8},{wch:7},{wch:14},{wch:16},{wch:12},{wch:12},{wch:12},{wch:14},{wch:14},{wch:22},{wch:22}];
+      XLSX.utils.book_append_sheet(wb,ws,'📦 Verecekler Detay');
+    }
+
+    // ─── 6. HAM VERİ (geri yükleme için) ────────────────────────
+    function ekHamSayfa(veri, ad){
+      if(!veri||!veri.length){ XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['Veri yok']]),ad); return; }
+      const kolonlar=Object.keys(veri[0]);
+      const satirlar=veri.map(r=>kolonlar.map(k=>r[k]??''));
+      const ws=XLSX.utils.aoa_to_sheet([kolonlar,...satirlar]);
+      ws['!cols']=kolonlar.map(()=>({wch:16}));
+      XLSX.utils.book_append_sheet(wb,ws,ad);
+    }
+    ekHamSayfa(products,              'RAW_products');
+    ekHamSayfa(sales,                 'RAW_sales');
+    ekHamSayfa(debtors,               'RAW_debtors');
+    ekHamSayfa(debtor_transactions,   'RAW_debtor_tx');
+    ekHamSayfa(debt_payments,         'RAW_debt_pay');
+    ekHamSayfa(creditors,             'RAW_creditors');
+    ekHamSayfa(creditor_transactions, 'RAW_creditor_tx');
+    ekHamSayfa(creditor_payments,     'RAW_creditor_pay');
 
     // ── İndir ──
-    const tarihDosya = new Date().toISOString().slice(0,10);
-    const dosyaAdi = `tarim-stok-yedek_${tarihDosya}.xlsx`;
+    const dosyaAdi=`tarim-stok-yedek_${tarihDosya}.xlsx`;
     XLSX.writeFile(wb, dosyaAdi);
-
-    toast(`✅ Yedek indirildi — ${dosyaAdi}`);
+    toast(`✅ Yedek indirildi — ${dosyaAdi} (${wb.SheetNames.length} sayfa)`);
 
   }catch(e){
     toast('❌ Yedek alınamadı: '+e.message, true);
     console.error(e);
   }finally{
-    btn.innerHTML = '<span style="font-size:16px">🛡️</span> Tam Yedek Al';
-    btn.disabled = false;
+    btn.innerHTML='<span style="font-size:16px">🛡️</span> Tam Yedek Al';
+    btn.disabled=false;
   }
 }
 
