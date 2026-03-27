@@ -1633,7 +1633,7 @@ async function tamYedekAl(){
     // ─── 4. ALACAKLAR (Kişi + işlem + ödeme birleşik) ───────────
     {
       const ws={};
-      const basliklar=['Kişi Adı','İşlem Tarihi','Ürün','Miktar','Birim',
+      const basliklar=['Kişi Adı','TC Kimlik','Telefon','Köy/Mahalle','İşlem Tarihi','Ürün','Miktar','Birim',
         'Birim Fiyat (₺)','İşlem Tutarı (₺)','Ödenen (₺)','Kalan (₺)','Durum',
         'Ödeme Tarihleri','Ödeme Notları'];
       baslikSatiri(ws,0,basliklar,'B71C1C');
@@ -1650,10 +1650,13 @@ async function tamYedekAl(){
 
         // Kişi başlık satırı
         bas(ws,r,0,d.name,true,'FFCCBC');
-        bas(ws,r,6,topBorc,true,'FFCCBC');
-        bas(ws,r,7,topOdenen,true,'FFCCBC');
-        bas(ws,r,8,topKalan,true,'FFCCBC');
-        bas(ws,r,9,topKalan<=0?'✅ TAM ÖDENDİ':'❌ BORÇ VAR',true,'FFCCBC');
+        bas(ws,r,1,d.tc_kimlik||'—',false,'FFCCBC');
+        bas(ws,r,2,d.telefon||'—',false,'FFCCBC');
+        bas(ws,r,3,d.koy||'—',false,'FFCCBC');
+        bas(ws,r,9,topBorc,true,'FFCCBC');
+        bas(ws,r,10,topOdenen,true,'FFCCBC');
+        bas(ws,r,11,topKalan,true,'FFCCBC');
+        bas(ws,r,12,topKalan<=0?'✅ TAM ÖDENDİ':'❌ BORÇ VAR',true,'FFCCBC');
         r++;
 
         if(dtxs.length===0){
@@ -1670,7 +1673,7 @@ async function tamYedekAl(){
             const odTarihler=pays.map(p=>p.date).join(', ')||'—';
             const odNotlar=pays.map(p=>p.note||'').filter(Boolean).join(', ')||'—';
 
-            [d.name,t.date,t.product,t.qty,t.unit,t.price,t.total,txOdenen,txKalan,
+            [d.name,d.tc_kimlik||'—',d.telefon||'—',d.koy||'—',t.date,t.product,t.qty,t.unit,t.price,t.total,txOdenen,txKalan,
               tamOdendi?'✅ Ödendi':'⏳ Bekliyor',odTarihler,odNotlar]
               .forEach((v,c)=>{
                 const addr=XLSX.utils.encode_cell({r,c});
@@ -1684,7 +1687,7 @@ async function tamYedekAl(){
       });
 
       setRef(ws,r,basliklar.length-1);
-      ws['!cols']=[{wch:20},{wch:12},{wch:28},{wch:8},{wch:7},{wch:14},{wch:16},{wch:14},{wch:12},{wch:14},{wch:22},{wch:22}];
+      ws['!cols']=[{wch:20},{wch:14},{wch:14},{wch:16},{wch:12},{wch:28},{wch:8},{wch:7},{wch:14},{wch:16},{wch:14},{wch:12},{wch:14},{wch:22},{wch:22}];
       XLSX.utils.book_append_sheet(wb,ws,'💳 Alacaklar Detay');
     }
 
@@ -2038,6 +2041,9 @@ function renderDebtorList(){
     return `<div class="person-item ${S.activeDebtorId===d.id?'active':''}" onclick="selectDebtor(${d.id})">
       <div style="flex:1;min-width:0">
         <div class="pi-name">${d.name}</div>
+        <div style="font-size:10px;color:var(--text-3);margin-top:1px">
+          ${d.telefon?'📞 '+d.telefon:''}${d.koy?' · 📍'+d.koy:''}
+        </div>
         <div class="pi-amount" style="margin-top:2px">${temiz?'✓ Temiz':kalan.toLocaleString('tr-TR')+' ₺'}</div>
       </div>
       <div style="display:flex;gap:4px;flex-shrink:0;margin-left:6px" onclick="event.stopPropagation()">
@@ -2066,7 +2072,12 @@ function renderDebtorDetail(id){
     <div class="detail-header">
       <div>
         <div class="detail-name">${d.name}</div>
-        <div style="font-size:11px;color:var(--text-3);margin-top:2px">${txs.length} işlem kaydı</div>
+        <div style="margin-top:5px;display:flex;flex-direction:column;gap:3px">
+          ${d.tc_kimlik?`<div style="font-size:11px;color:var(--text-3)">🪪 TC: <span style="font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--text-2)">${d.tc_kimlik}</span></div>`:''}
+          ${d.telefon?`<div style="font-size:11px;color:var(--text-3)">📞 <span style="font-weight:600;color:var(--text-2)">${d.telefon}</span></div>`:''}
+          ${d.koy?`<div style="font-size:11px;color:var(--text-3)">📍 <span style="font-weight:600;color:var(--text-2)">${d.koy}</span></div>`:''}
+        </div>
+        <div style="font-size:11px;color:var(--text-3);margin-top:4px">${txs.length} işlem kaydı</div>
       </div>
       <div style="text-align:right">
         <div class="detail-total debt" style="color:${tamOdendi?'var(--green)':'var(--red)'}">
@@ -2506,11 +2517,21 @@ function openModal(type,id=null){
       <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">İptal</button><button class="btn btn-red" onclick="doRemoveStock()">Çıkış Yap</button></div>`,
 
     addDebtor:`<h3>👤 Alacaklı Kişi Ekle</h3>
-      <div class="form-group"><label>Kişi Adı</label><input id="f-name" placeholder="Ad Soyad"/></div>
+      <div class="form-group"><label>Ad Soyad</label><input id="f-name" placeholder="Ad Soyad"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>TC Kimlik No</label><input id="f-tc" type="text" maxlength="11" placeholder="12345678901"/></div>
+        <div class="form-group"><label>Telefon</label><input id="f-tel" type="tel" placeholder="0555 123 45 67"/></div>
+      </div>
+      <div class="form-group"><label>Köy / Mahalle</label><input id="f-koy" placeholder="Köy veya mahalle adı"/></div>
       <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">İptal</button><button class="btn btn-green" onclick="saveDebtor()">Ekle</button></div>`,
 
     editDebtor:`<h3>✏️ Kişiyi Düzenle</h3>
-      <div class="form-group"><label>Kişi Adı</label><input id="f-name" placeholder="Ad Soyad"/></div>
+      <div class="form-group"><label>Ad Soyad</label><input id="f-name" placeholder="Ad Soyad"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>TC Kimlik No</label><input id="f-tc" type="text" maxlength="11" placeholder="12345678901"/></div>
+        <div class="form-group"><label>Telefon</label><input id="f-tel" type="tel" placeholder="0555 123 45 67"/></div>
+      </div>
+      <div class="form-group"><label>Köy / Mahalle</label><input id="f-koy" placeholder="Köy veya mahalle adı"/></div>
       <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">İptal</button><button class="btn btn-green" onclick="updateDebtor()">Kaydet</button></div>`,
 
     addDebtorTrans:`<h3>➕ İşlem Ekle</h3>
@@ -2672,10 +2693,17 @@ function openModal(type,id=null){
       window._kalanBorc=kalan;
     }
   }
-  // editDebtor için mevcut ismi doldur
+  // editDebtor için mevcut bilgileri doldur
   if(type==='editDebtor'){
     const d=S.debtors.find(x=>x.id===id);
-    if(d) setTimeout(()=>{ const inp=document.getElementById('f-name'); if(inp){inp.value=d.name; inp.select();} },50);
+    if(d) setTimeout(()=>{
+      const set=(elId,val)=>{ const el=document.getElementById(elId); if(el) el.value=val||''; };
+      set('f-name', d.name);
+      set('f-tc',   d.tc_kimlik);
+      set('f-tel',  d.telefon);
+      set('f-koy',  d.koy);
+      document.getElementById('f-name')?.select();
+    },50);
   }
   // editCreditor için mevcut ismi doldur
   if(type==='editCreditor'){
@@ -2838,9 +2866,16 @@ async function doRemoveStock(){
 
 async function saveDebtor(){
   const name=fv('f-name');
+  const tc=fv('f-tc'), tel=fv('f-tel'), koy=fv('f-koy');
   if(!name){toast('⚠️ İsim girin',true);return;}
+  if(tc && tc.length!==11){toast('⚠️ TC Kimlik No 11 haneli olmalı',true);return;}
   showLoad();
-  const {error}=await db.from('debtors').insert({name});
+  const {error}=await db.from('debtors').insert({
+    name,
+    tc_kimlik:tc||null,
+    telefon:tel||null,
+    koy:koy||null
+  });
   hideLoad();
   if(error){toast('❌ '+error.message,true);return;}
   closeModal(); toast('✅ Kişi eklendi!'); loadDebtors();
@@ -2848,13 +2883,20 @@ async function saveDebtor(){
 
 async function updateDebtor(){
   const name=fv('f-name');
+  const tc=fv('f-tc'), tel=fv('f-tel'), koy=fv('f-koy');
   if(!name){toast('⚠️ İsim girin',true);return;}
+  if(tc && tc.length!==11){toast('⚠️ TC Kimlik No 11 haneli olmalı',true);return;}
   showLoad();
-  const {error}=await db.from('debtors').update({name}).eq('id',_mId);
+  const {error}=await db.from('debtors').update({
+    name,
+    tc_kimlik:tc||null,
+    telefon:tel||null,
+    koy:koy||null
+  }).eq('id',_mId);
   hideLoad();
   if(error){toast('❌ '+error.message,true);return;}
   closeModal();
-  toast('✅ İsim güncellendi!');
+  toast('✅ Kişi bilgileri güncellendi!');
   await loadDebtors();
   if(S.activeDebtorId===_mId) renderDebtorDetail(_mId);
 }
