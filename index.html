@@ -1726,7 +1726,7 @@ async function tamYedekAl(){
     // ─── 3. SATIŞ GEÇMİŞİ ────────────────────────────────────────
     {
       const ws={};
-      const basliklar=['Tarih','Saat','Ürün Adı','Kategori','Miktar','Birim','Birim Fiyat (₺)','Toplam (₺)'];
+      const basliklar=['Tarih','Saat','Ürün Adı','Kategori','Miktar','Birim','Birim Fiyat (₺)','Toplam (₺)','Ödeme Türü'];
       baslikSatiri(ws,0,basliklar,'1565C0');
 
       (sales||[]).forEach((s,i)=>{
@@ -1741,8 +1741,9 @@ async function tamYedekAl(){
       const totR=(sales||[]).length+2;
       bas(ws,totR,0,'GENEL TOPLAM',true,'E8F5E9');
       bas(ws,totR,7,(sales||[]).reduce((a,s)=>a+Number(s.total),0),true,'E8F5E9');
+      bas(ws,totR,8,'Toplam',true,'E8F5E9');
       setRef(ws,totR,basliklar.length-1);
-      ws['!cols']=[{wch:12},{wch:8},{wch:35},{wch:12},{wch:8},{wch:7},{wch:16},{wch:14}];
+      ws['!cols']=[{wch:12},{wch:8},{wch:35},{wch:12},{wch:8},{wch:7},{wch:16},{wch:14},{wch:12}];
       XLSX.utils.book_append_sheet(wb,ws,'🛒 Satış Geçmişi');
     }
 
@@ -3960,16 +3961,28 @@ function faturaCikti(faturaNo, tarih, time, odemeYontem, kismiOdenen, borcTutar,
   </div>
 
   <!-- TOPLAM -->
-  <div class="toplam-wrap">
-    <div class="toplam-kutu">
-      <div class="toplam-label">Genel Toplam</div>
+  <div class="toplam-wrap" style="gap:10px;flex-direction:column;align-items:flex-end">
+    ${odemeYontem==='kismi'?`
+    <div style="display:flex;gap:10px;justify-content:flex-end;width:100%">
+      <div class="toplam-kutu" style="background:#f57c00;min-width:180px">
+        <div class="toplam-label">Peşinat Alındı</div>
+        <div class="toplam-deger">${kismiOdenen.toLocaleString('tr-TR')} ₺</div>
+      </div>
+      <div class="toplam-kutu" style="background:#e53935;min-width:180px">
+        <div class="toplam-label">Kalan Borç</div>
+        <div class="toplam-deger">${borcTutar.toLocaleString('tr-TR')} ₺</div>
+      </div>
+    </div>`:''}
+    <div class="toplam-kutu" style="background:${odemeYontem==='nakit'?'#0d7a00':odemeYontem==='kismi'?'#1565c0':'#c62828'}">
+      <div class="toplam-label">${odemeYontem==='nakit'?'Genel Toplam (Nakit)':odemeYontem==='kismi'?'Genel Toplam':'⚠️ Alacağa Atıldı'}</div>
       <div class="toplam-deger">${toplam.toLocaleString('tr-TR')} ₺</div>
+      ${odemeYontem==='alacak'?`<div style="font-size:10px;opacity:.85;margin-top:4px">Tamamı borç — Nakit tahsilat yapılmadı</div>`:''}
     </div>
   </div>
 
   <!-- ÖDEME DURUMU -->
   <div class="odeme-durum ${odemeYontem==='nakit'?'odeme-nakit':odemeYontem==='kismi'?'odeme-kismi':'odeme-alacak'}">
-    ${odemeLabel} ${borcluAdi&&odemeYontem!=='nakit'?' — Müşteri: '+borcluAdi:''}
+    ${odemeLabel}${borcluAdi&&odemeYontem!=='nakit'?' — Müşteri: '+borcluAdi:''}
   </div>
 
   <!-- ALT BİLGİ -->
