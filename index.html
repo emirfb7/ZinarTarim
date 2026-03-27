@@ -1363,24 +1363,40 @@ async function loadDashboard(){
     ]);
 
     const s = sales||[], prods = products||[];
-    const rev = s.reduce((a,x)=>a+Number(x.total),0);
+
+    // Ödeme türüne göre ayır
+    const nakitSatislar  = s.filter(x=>!x.odeme_turu||x.odeme_turu==='nakit');
+    const kismiSatislar  = s.filter(x=>x.odeme_turu==='kismi');
+    const alacakSatislar = s.filter(x=>x.odeme_turu==='alacak');
+    const askidaSatislar = [...kismiSatislar,...alacakSatislar];
+
+    const nakitRev  = nakitSatislar.reduce((a,x)=>a+Number(x.total),0);
+    const kismiRev  = kismiSatislar.reduce((a,x)=>a+Number(x.total),0);
+    const alacakRev = alacakSatislar.reduce((a,x)=>a+Number(x.total),0);
+    const askidaRev = kismiRev+alacakRev;
+    const toplamRev = s.reduce((a,x)=>a+Number(x.total),0);
     const qty = s.reduce((a,x)=>a+Number(x.qty),0);
     const low = prods.filter(p=>p.stock<=p.min_stock).length;
 
-    // Dönem etiketi
     const isOneDay = from === to;
     const label = isOneDay ? (from===todayStr()?'Bugün':from) : `${from} – ${to}`;
 
     document.getElementById('dashCards').innerHTML=`
       <div class="dash-card highlight">
-        <div class="dash-card-label">💰 Toplam Kazanç</div>
-        <div class="dash-card-value">${rev.toLocaleString('tr-TR')} ₺</div>
-        <div class="dash-card-sub">${label}</div>
+        <div class="dash-card-label">💵 Nakit Gelir</div>
+        <div class="dash-card-value">${nakitRev.toLocaleString('tr-TR')} ₺</div>
+        <div class="dash-card-sub">${nakitSatislar.length} nakit işlem · ${label}</div>
       </div>
+      ${askidaRev>0?`
+      <div class="dash-card" style="border-color:#ffe082;background:#fffde7">
+        <div class="dash-card-label" style="color:var(--orange)">⏳ Askıda (Alacak)</div>
+        <div class="dash-card-value" style="color:var(--orange)">${askidaRev.toLocaleString('tr-TR')} ₺</div>
+        <div class="dash-card-sub">${askidaSatislar.length} işlem henüz tahsil edilmedi</div>
+      </div>`:''}
       <div class="dash-card">
-        <div class="dash-card-label">🧾 İşlem Sayısı</div>
+        <div class="dash-card-label">🧾 Toplam İşlem</div>
         <div class="dash-card-value">${s.length}</div>
-        <div class="dash-card-sub">${label} toplam satış</div>
+        <div class="dash-card-sub">${label}</div>
       </div>
       <div class="dash-card">
         <div class="dash-card-label">🛒 Satılan Birim</div>
@@ -1390,27 +1406,41 @@ async function loadDashboard(){
       <div class="dash-card">
         <div class="dash-card-label">⚠️ Az Stok</div>
         <div class="dash-card-value" style="color:var(--red)">${low}</div>
-        <div class="dash-card-sub">Ürün minimum stokta</div>
+        <div class="dash-card-sub">Minimum stokta</div>
       </div>
       ${s.length > 0 ? `
       <div class="dash-card">
-        <div class="dash-card-label">📈 Ortalama Satış</div>
-        <div class="dash-card-value">${Math.round(rev/s.length).toLocaleString('tr-TR')} ₺</div>
-        <div class="dash-card-sub">İşlem başına</div>
+        <div class="dash-card-label">📈 Toplam Ciro</div>
+        <div class="dash-card-value">${toplamRev.toLocaleString('tr-TR')} ₺</div>
+        <div class="dash-card-sub">Nakit + askıda</div>
       </div>` : ''}
     `;
 
     document.getElementById('dashTableTitle').textContent = `📋 Satışlar — ${label}`;
-    document.getElementById('dashTableMeta').textContent = s.length > 0 ? `${s.length} kayıt · ${rev.toLocaleString('tr-TR')} ₺` : '';
+    document.getElementById('dashTableMeta').textContent = s.length > 0
+      ? `${nakitSatislar.length} nakit · ${askidaSatislar.length} askıda · Toplam: ${toplamRev.toLocaleString('tr-TR')} ₺`
+      : '';
+
+    const odemeLabel=(t)=>{
+      if(!t||t==='nakit') return '';
+      if(t==='alacak') return '<span style="display:inline-block;font-size:10px;font-weight:700;background:#fff8e1;color:#f57c00;border:1px solid #ffe082;border-radius:4px;padding:1px 6px;margin-left:4px">💳 Alacağa atıldı</span>';
+      if(t==='kismi')  return '<span style="display:inline-block;font-size:10px;font-weight:700;background:#e3f2fd;color:#1565c0;border:1px solid #90caf9;border-radius:4px;padding:1px 6px;margin-left:4px">💙 Kısmi ödeme</span>';
+      return '';
+    };
+    const satirBg=(t)=>{
+      if(t==='alacak') return 'background:#fffde7';
+      if(t==='kismi')  return 'background:#f3f9ff';
+      return '';
+    };
 
     const tb = document.getElementById('salesTableBody');
     tb.innerHTML = s.length
-      ? s.map(x=>`<tr>
-          <td><b>${x.product_name}</b></td>
+      ? s.map(x=>`<tr style="${satirBg(x.odeme_turu)}">
+          <td><b>${x.product_name}</b>${odemeLabel(x.odeme_turu)}</td>
           <td><span class="badge badge-green">${x.cat}</span></td>
           <td>${x.qty} ${x.unit}</td>
           <td>${Number(x.price).toLocaleString('tr-TR')} ₺</td>
-          <td><b>${Number(x.total).toLocaleString('tr-TR')} ₺</b></td>
+          <td><b style="color:${x.odeme_turu&&x.odeme_turu!=='nakit'?'var(--orange)':'inherit'}">${Number(x.total).toLocaleString('tr-TR')} ₺</b></td>
           <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-3)">${x.sale_date}</td>
           <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-3)">${x.sale_time||'—'}</td>
         </tr>`).join('')
@@ -2992,7 +3022,7 @@ async function doRemoveStock(){
   showLoad();
   const [r1,r2]=await Promise.all([
     db.from('products').update({stock:p.stock-qty,last_out:date}).eq('id',_mId),
-    db.from('sales').insert({product_id:p.id,product_name:p.name,qty,unit:p.unit,price:price||p.price,total:qty*(price||p.price),sale_time:time,sale_date:date,cat:p.cat}),
+    db.from('sales').insert({product_id:p.id,product_name:p.name,qty,unit:p.unit,price:price||p.price,total:qty*(price||p.price),sale_time:time,sale_date:date,cat:p.cat,odeme_turu:'nakit'}),
   ]);
   hideLoad();
   if(r1.error||r2.error){toast('❌ Hata oluştu',true);return;}
@@ -3701,7 +3731,8 @@ async function tamamlaSatis(){
         total: s.qty * s.birimFiyat,
         sale_time: time,
         sale_date: tarih,
-        cat: s.product.cat
+        cat: s.product.cat,
+        odeme_turu: odemeYontem
       });
     }
 
