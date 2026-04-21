@@ -702,6 +702,7 @@ tr:hover td{background:#fafff9}
       <button class="nav-btn" onclick="showPage('dashboard')">Dashboard</button>
       <button class="nav-btn" onclick="showPage('alacaklar')">Alacaklar</button>
       <button class="nav-btn" onclick="showPage('verecekler')">Verecekler</button>
+      <button class="nav-btn" onclick="showPage('eskiborc')">📒 Eski Borçlar</button>
     </div>
     <div class="topbar-right">
       <!-- Hamburger: sadece mobilde görünür -->
@@ -1003,6 +1004,54 @@ tr:hover td{background:#fafff9}
             <div class="empty-state" style="margin:auto"><div class="empty-icon">👈</div><p>Soldaki listeden tedarikçi seçin</p></div>
           </div>
         </div>
+      
+      <!-- ESKİ BORÇLAR PAGE — Tamamen izole, localStorage -->
+      <div class="page" id="page-eskiborc">
+        <div class="page-header">
+          <div>
+            <div class="page-title">📒 Eski Borçlar</div>
+            <div class="page-sub" style="font-size:12px;color:var(--text-3)">Uygulamadan önce birikmiş borçların takibi — diğer sayfalara etki etmez</div>
+          </div>
+          <button class="btn btn-green" onclick="eskiBorcModal()">＋ Borçlu Ekle</button>
+        </div>
+
+        <!-- Özet bar -->
+        <div class="borc-ozet-bar" id="eskiBorcOzetBar" style="display:none">
+          <div class="borc-ozet-kart vurgu">
+            <div class="borc-ozet-label">Toplam Borç</div>
+            <div class="borc-ozet-deger" id="eb-toplam">— ₺</div>
+          </div>
+          <div class="borc-ozet-kart">
+            <div class="borc-ozet-label">Tahsil Edilen</div>
+            <div class="borc-ozet-deger yesil" id="eb-odenen">— ₺</div>
+          </div>
+          <div class="borc-ozet-kart">
+            <div class="borc-ozet-label">Kalan</div>
+            <div class="borc-ozet-deger kirmizi" id="eb-kalan">— ₺</div>
+          </div>
+          <div class="borc-ozet-kart">
+            <div class="borc-ozet-label">Borçlu Kişi</div>
+            <div class="borc-ozet-deger" id="eb-kisi">—</div>
+          </div>
+        </div>
+
+        <!-- Liste -->
+        <div id="eskiBorcListe" style="display:flex;flex-direction:column;gap:10px">
+          <div class="empty-state"><div class="empty-icon">📒</div><p>Henüz kayıt yok</p></div>
+        </div>
+
+        <!-- Modal -->
+        <div id="ebModalBg" onclick="if(event.target===this)kapatEbModal()" style="
+          display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);
+          z-index:500;align-items:center;justify-content:center;
+          backdrop-filter:blur(2px)
+        ">
+          <div id="ebModalKutu" style="
+            background:#fff;border-radius:18px;padding:24px;
+            width:min(460px,94vw);max-height:90svh;overflow-y:auto;
+            box-shadow:0 24px 60px rgba(0,0,0,.2);
+          "></div>
+        </div>
       </div>
 
     </div>
@@ -1039,6 +1088,9 @@ tr:hover td{background:#fafff9}
   </button>
   <button class="mobile-nav-btn" id="mnav-verecekler" onclick="showPage('verecekler');closeSidebar()">
     <span class="mnav-icon">📦</span>Vercek
+  </button>
+  <button class="mobile-nav-btn" id="mnav-eskiborc" onclick="showPage('eskiborc');closeSidebar()">
+    <span class="mnav-icon">📒</span>Eski
   </button>
 </nav>
 
@@ -1186,17 +1238,18 @@ function showPage(name){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
-  const labels={stock:'Anasayfa',satis:'🛒 Satış Yap',dashboard:'Dashboard',alacaklar:'Alacaklar',verecekler:'Verecekler'};
+  const labels={stock:'Anasayfa',satis:'🛒 Satış Yap',dashboard:'Dashboard',alacaklar:'Alacaklar',verecekler:'Verecekler',eskiborc:'📒 Eski Borçlar'};
   document.querySelectorAll('.nav-btn').forEach(b=>{ if(b.textContent.trim()===labels[name]) b.classList.add('active'); });
   // Bottom nav sync
   document.querySelectorAll('.mobile-nav-btn').forEach(b=>b.classList.remove('active'));
-  const mnavMap={stock:'mnav-stock',satis:'mnav-satis',dashboard:'mnav-dashboard',alacaklar:'mnav-alacaklar',verecekler:'mnav-verecekler'};
+  const mnavMap={stock:'mnav-stock',satis:'mnav-satis',dashboard:'mnav-dashboard',alacaklar:'mnav-alacaklar',verecekler:'mnav-verecekler',eskiborc:'mnav-eskiborc'};
   if(mnavMap[name]) document.getElementById(mnavMap[name])?.classList.add('active');
   if(name==='stock')      loadProducts();
   if(name==='satis')      loadSatisPage();
   if(name==='dashboard')  loadDashboardInit();
   if(name==='alacaklar')  loadDebtors();
   if(name==='verecekler') loadCreditors();
+  if(name==='eskiborc')   renderEskiBorc();
 }
 
 // ══════════════════════════════════════
@@ -2373,6 +2426,237 @@ async function doLogin(){
 
   showMainApp();
   await loadProducts();
+}
+
+// ══════════════════════════════════════
+//  ESKİ BORÇLAR
+// ══════════════════════════════════════
+let _ebKayitlar = [];
+
+async function renderEskiBorc(){
+  const liste = document.getElementById('eskiBorcListe');
+  liste.innerHTML = `<div class="empty-state"><div class="empty-icon">⏳</div><p>Yükleniyor...</p></div>`;
+
+  try{
+    const {data, error} = await db.from('eski_alacaklar').select('*').order('created_at',{ascending:false});
+    if(error) throw error;
+    _ebKayitlar = data || [];
+  }catch(e){
+    liste.innerHTML = `<div class="empty-state"><div class="empty-icon">❌</div><p>${e.message}</p></div>`;
+    return;
+  }
+
+  // Özet bar
+  const toplam = _ebKayitlar.reduce((a,k)=>a+Number(k.borc_tutari),0);
+  const odenen = _ebKayitlar.reduce((a,k)=>a+Number(k.odenen||0),0);
+  const kalan  = Math.max(0, toplam - odenen);
+  const fmt    = n => n.toLocaleString('tr-TR') + ' ₺';
+  const bar    = document.getElementById('eskiBorcOzetBar');
+  document.getElementById('eb-toplam').textContent = fmt(toplam);
+  document.getElementById('eb-odenen').textContent = fmt(odenen);
+  document.getElementById('eb-kalan').textContent  = fmt(kalan);
+  document.getElementById('eb-kisi').textContent   = _ebKayitlar.length + ' kişi';
+  bar.style.display = 'grid';
+
+  if(!_ebKayitlar.length){
+    liste.innerHTML = `<div class="empty-state"><div class="empty-icon">📒</div><p>Henüz kayıt yok — ＋ Borçlu Ekle butonunu kullanın</p></div>`;
+    return;
+  }
+
+  liste.innerHTML = _ebKayitlar.map(k=>{
+    const kOdenen = Number(k.odenen||0);
+    const kKalan  = Math.max(0, Number(k.borc_tutari) - kOdenen);
+    const tamOdendi = kKalan <= 0;
+    return `
+    <div style="background:#fff;border:1.5px solid ${tamOdendi?'var(--green-border)':'#ffe082'};
+      border-left:4px solid ${tamOdendi?'var(--green)':'var(--orange)'};
+      border-radius:var(--radius-sm);padding:14px 16px;
+      box-shadow:var(--shadow);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+
+      <!-- Kişi bilgisi -->
+      <div style="flex:1;min-width:0">
+        <div style="font-size:15px;font-weight:900;color:var(--text)">${k.ad_soyad}</div>
+        <div style="margin-top:4px;display:flex;gap:10px;flex-wrap:wrap">
+          ${k.telefon?`<span style="font-size:11px;color:var(--text-3)">📞 ${k.telefon}</span>`:''}
+          ${k.koy?`<span style="font-size:11px;color:var(--text-3)">📍 ${k.koy}</span>`:''}
+        </div>
+        ${k.aciklama?`<div style="font-size:11px;color:var(--text-3);margin-top:4px;font-style:italic">💬 ${k.aciklama}</div>`:''}
+      </div>
+
+      <!-- Tutar bilgisi -->
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-size:18px;font-weight:900;font-family:'JetBrains Mono',monospace;
+          color:${tamOdendi?'var(--green)':'var(--orange)'}">
+          ${kKalan.toLocaleString('tr-TR')} ₺
+        </div>
+        <div style="font-size:10px;color:var(--text-3)">Kalan</div>
+        <div style="font-size:10px;color:var(--text-3);margin-top:1px">
+          Toplam: ${Number(k.borc_tutari).toLocaleString('tr-TR')} ₺
+          ${kOdenen>0?` · Ödenen: ${kOdenen.toLocaleString('tr-TR')} ₺`:''}
+        </div>
+        ${tamOdendi?`<div style="font-size:10px;color:var(--green);font-weight:700;margin-top:2px">✅ Kapandı</div>`:''}
+      </div>
+
+      <!-- Butonlar -->
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        ${!tamOdendi?`
+        <button class="btn btn-green btn-sm" onclick="ebOdemeModal(${k.id})">💵 Ödeme Al</button>`:''}
+        <button class="pi-action-btn edit" title="Düzenle" onclick="ebDuzenleModal(${k.id})">✏️</button>
+        <button class="pi-action-btn del" title="Sil" onclick="ebSil(${k.id},'${k.ad_soyad.replace(/'/g,"\\'")}')">🗑️</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function eskiBorcModal(){
+  const ktu = document.getElementById('ebModalKutu');
+  ktu.innerHTML = `
+    <h3 style="font-size:17px;font-weight:900;color:var(--green-dark);margin-bottom:16px">📒 Borçlu Ekle</h3>
+    <div class="form-group"><label>Ad Soyad <span style="color:var(--red)">*</span></label>
+      <input id="eb-f-ad" placeholder="Ad Soyad"/></div>
+    <div class="form-row">
+      <div class="form-group"><label>Telefon</label>
+        <input id="eb-f-tel" type="tel" placeholder="0555 123 45 67"/></div>
+      <div class="form-group"><label>Köy / Mahalle</label>
+        <input id="eb-f-koy" placeholder="Köy adı"/></div>
+    </div>
+    <div class="form-group"><label>Borç Tutarı (₺) <span style="color:var(--red)">*</span></label>
+      <input id="eb-f-tutar" type="number" min="0" placeholder="0"/></div>
+    <div class="form-group"><label>Açıklama (opsiyonel)</label>
+      <input id="eb-f-aciklama" placeholder="Borç hakkında not..."/></div>
+    <div style="display:flex;gap:8px;margin-top:18px">
+      <button class="btn btn-outline" style="flex:1;justify-content:center" onclick="kapatEbModal()">İptal</button>
+      <button class="btn btn-green"  style="flex:1;justify-content:center" onclick="ebKaydet()">✅ Kaydet</button>
+    </div>`;
+  document.getElementById('ebModalBg').style.display='flex';
+  setTimeout(()=>document.getElementById('eb-f-ad')?.focus(),100);
+}
+
+function ebDuzenleModal(id){
+  const k = _ebKayitlar.find(x=>x.id===id); if(!k) return;
+  const ktu = document.getElementById('ebModalKutu');
+  ktu.innerHTML = `
+    <h3 style="font-size:17px;font-weight:900;color:var(--green-dark);margin-bottom:16px">✏️ Kaydı Düzenle</h3>
+    <div class="form-group"><label>Ad Soyad <span style="color:var(--red)">*</span></label>
+      <input id="eb-f-ad" value="${k.ad_soyad}" placeholder="Ad Soyad"/></div>
+    <div class="form-row">
+      <div class="form-group"><label>Telefon</label>
+        <input id="eb-f-tel" type="tel" value="${k.telefon||''}" placeholder="0555 123 45 67"/></div>
+      <div class="form-group"><label>Köy / Mahalle</label>
+        <input id="eb-f-koy" value="${k.koy||''}" placeholder="Köy adı"/></div>
+    </div>
+    <div class="form-group"><label>Borç Tutarı (₺) <span style="color:var(--red)">*</span></label>
+      <input id="eb-f-tutar" type="number" min="0" value="${k.borc_tutari}" placeholder="0"/></div>
+    <div class="form-group"><label>Açıklama (opsiyonel)</label>
+      <input id="eb-f-aciklama" value="${k.aciklama||''}" placeholder="Borç hakkında not..."/></div>
+    <div style="display:flex;gap:8px;margin-top:18px">
+      <button class="btn btn-outline" style="flex:1;justify-content:center" onclick="kapatEbModal()">İptal</button>
+      <button class="btn btn-green"  style="flex:1;justify-content:center" onclick="ebGuncelle(${id})">💾 Güncelle</button>
+    </div>`;
+  document.getElementById('ebModalBg').style.display='flex';
+}
+
+function ebOdemeModal(id){
+  const k = _ebKayitlar.find(x=>x.id===id); if(!k) return;
+  const kOdenen = Number(k.odenen||0);
+  const kKalan  = Math.max(0, Number(k.borc_tutari) - kOdenen);
+  const ktu = document.getElementById('ebModalKutu');
+  ktu.innerHTML = `
+    <h3 style="font-size:17px;font-weight:900;color:var(--green-dark);margin-bottom:16px">💵 Ödeme Al</h3>
+    <div style="background:var(--green-light);border:1px solid var(--green-border);border-radius:12px;
+      padding:12px 14px;margin-bottom:16px">
+      <div style="font-size:14px;font-weight:900;color:var(--text)">${k.ad_soyad}</div>
+      <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:13px">
+        <span style="color:var(--text-3)">Toplam Borç</span>
+        <span style="font-weight:800;font-family:'JetBrains Mono',monospace">${Number(k.borc_tutari).toLocaleString('tr-TR')} ₺</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:13px">
+        <span style="color:var(--text-3)">Ödenen</span>
+        <span style="font-weight:800;color:var(--green);font-family:'JetBrains Mono',monospace">${kOdenen.toLocaleString('tr-TR')} ₺</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:15px;padding-top:8px;
+        border-top:1px solid var(--green-border);margin-top:6px">
+        <span style="font-weight:800">Kalan</span>
+        <span style="font-weight:900;color:var(--orange);font-family:'JetBrains Mono',monospace">${kKalan.toLocaleString('tr-TR')} ₺</span>
+      </div>
+    </div>
+    <div class="form-group"><label>Alınan Tutar (₺)</label>
+      <input id="eb-f-odeme" type="number" min="1" max="${kKalan}" placeholder="0"/>
+      <div style="margin-top:6px">
+        <button type="button" class="btn btn-outline btn-sm" style="width:100%;justify-content:center"
+          onclick="document.getElementById('eb-f-odeme').value=${kKalan}">Tamamını Öde (${kKalan.toLocaleString('tr-TR')} ₺)</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:18px">
+      <button class="btn btn-outline" style="flex:1;justify-content:center" onclick="kapatEbModal()">İptal</button>
+      <button class="btn btn-green"  style="flex:1;justify-content:center" onclick="ebOdemeKaydet(${id})">💵 Ödemeyi Kaydet</button>
+    </div>`;
+  document.getElementById('ebModalBg').style.display='flex';
+  setTimeout(()=>document.getElementById('eb-f-odeme')?.focus(),100);
+}
+
+function kapatEbModal(){
+  document.getElementById('ebModalBg').style.display='none';
+}
+
+async function ebKaydet(){
+  const ad    = document.getElementById('eb-f-ad')?.value?.trim();
+  const tel   = document.getElementById('eb-f-tel')?.value?.trim();
+  const koy   = document.getElementById('eb-f-koy')?.value?.trim();
+  const tutar = +document.getElementById('eb-f-tutar')?.value;
+  const acik  = document.getElementById('eb-f-aciklama')?.value?.trim();
+  if(!ad){ alert('Ad Soyad gerekli'); return; }
+  if(!tutar||tutar<=0){ alert('Borç tutarı gerekli'); return; }
+  const btn = document.querySelector('#ebModalKutu .btn-green');
+  btn.disabled=true; btn.textContent='⏳ Kaydediliyor...';
+  const {error} = await db.from('eski_alacaklar').insert({
+    ad_soyad:ad, telefon:tel||null, koy:koy||null,
+    borc_tutari:tutar, aciklama:acik||null, odenen:0
+  });
+  if(error){ alert('Hata: '+error.message); btn.disabled=false; btn.textContent='✅ Kaydet'; return; }
+  kapatEbModal();
+  renderEskiBorc();
+}
+
+async function ebGuncelle(id){
+  const ad    = document.getElementById('eb-f-ad')?.value?.trim();
+  const tel   = document.getElementById('eb-f-tel')?.value?.trim();
+  const koy   = document.getElementById('eb-f-koy')?.value?.trim();
+  const tutar = +document.getElementById('eb-f-tutar')?.value;
+  const acik  = document.getElementById('eb-f-aciklama')?.value?.trim();
+  if(!ad){ alert('Ad Soyad gerekli'); return; }
+  if(!tutar||tutar<=0){ alert('Borç tutarı gerekli'); return; }
+  const btn = document.querySelector('#ebModalKutu .btn-green');
+  btn.disabled=true; btn.textContent='⏳ Güncelleniyor...';
+  const {error} = await db.from('eski_alacaklar').update({
+    ad_soyad:ad, telefon:tel||null, koy:koy||null,
+    borc_tutari:tutar, aciklama:acik||null
+  }).eq('id',id);
+  if(error){ alert('Hata: '+error.message); btn.disabled=false; btn.textContent='💾 Güncelle'; return; }
+  kapatEbModal();
+  renderEskiBorc();
+}
+
+async function ebOdemeKaydet(id){
+  const k = _ebKayitlar.find(x=>x.id===id); if(!k) return;
+  const miktar = +document.getElementById('eb-f-odeme')?.value;
+  const kKalan = Math.max(0, Number(k.borc_tutari) - Number(k.odenen||0));
+  if(!miktar||miktar<=0){ alert('Geçerli tutar girin'); return; }
+  if(miktar>kKalan){ alert(`En fazla ${kKalan.toLocaleString('tr-TR')} ₺ girilebilir`); return; }
+  const btn = document.querySelector('#ebModalKutu .btn-green');
+  btn.disabled=true; btn.textContent='⏳ Kaydediliyor...';
+  const yeniOdenen = Number(k.odenen||0) + miktar;
+  const {error} = await db.from('eski_alacaklar').update({odenen: yeniOdenen}).eq('id',id);
+  if(error){ alert('Hata: '+error.message); btn.disabled=false; btn.textContent='💵 Ödemeyi Kaydet'; return; }
+  kapatEbModal();
+  renderEskiBorc();
+}
+
+async function ebSil(id, ad){
+  if(!confirm(`"${ad}" adlı kaydı silmek istediğinize emin misiniz?\nBu işlem geri alınamaz.`)) return;
+  const {error} = await db.from('eski_alacaklar').delete().eq('id',id);
+  if(error){ alert('Hata: '+error.message); return; }
+  renderEskiBorc();
 }
 
 async function doLogout(){
