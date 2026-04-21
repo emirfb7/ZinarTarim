@@ -1012,7 +1012,9 @@ tr:hover td{background:#fafff9}
             <div class="page-title">📒 Eski Borçlar</div>
             <div class="page-sub" style="font-size:12px;color:var(--text-3)">Uygulamadan önce birikmiş borçların takibi — diğer sayfalara etki etmez</div>
           </div>
-          <button class="btn btn-green" onclick="eskiBorcModal()">＋ Borçlu Ekle</button>
+          <div>
+            <button class="btn btn-green" onclick="eskiBorcModal()">＋ Borçlu Ekle</button>
+          </div>
         </div>
 
         <!-- Özet bar -->
@@ -1234,22 +1236,49 @@ function renderProductsFiltered(){
 // ══════════════════════════════════════
 //  PAGE ROUTING
 // ══════════════════════════════════════
+// Sayfa cache — son yüklemeden kaç saniye geçti
+const _pageCache = {};
+const CACHE_TTL  = 45; // saniye
+
+function _cacheGecerli(name){
+  const t = _pageCache[name];
+  return t && (Date.now()-t) < CACHE_TTL*1000;
+}
+function _cacheGuncelle(name){ _pageCache[name]=Date.now(); }
+function _cacheSifirla(name){ delete _pageCache[name]; }
+
 function showPage(name){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
   const labels={stock:'Anasayfa',satis:'🛒 Satış Yap',dashboard:'Dashboard',alacaklar:'Alacaklar',verecekler:'Verecekler',eskiborc:'📒 Eski Borçlar'};
   document.querySelectorAll('.nav-btn').forEach(b=>{ if(b.textContent.trim()===labels[name]) b.classList.add('active'); });
-  // Bottom nav sync
   document.querySelectorAll('.mobile-nav-btn').forEach(b=>b.classList.remove('active'));
   const mnavMap={stock:'mnav-stock',satis:'mnav-satis',dashboard:'mnav-dashboard',alacaklar:'mnav-alacaklar',verecekler:'mnav-verecekler',eskiborc:'mnav-eskiborc'};
   if(mnavMap[name]) document.getElementById(mnavMap[name])?.classList.add('active');
-  if(name==='stock')      loadProducts();
-  if(name==='satis')      loadSatisPage();
-  if(name==='dashboard')  loadDashboardInit();
-  if(name==='alacaklar')  loadDebtors();
-  if(name==='verecekler') loadCreditors();
-  if(name==='eskiborc')   renderEskiBorc();
+
+  // Cache kontrolü — 45 saniye içinde aynı sayfaya tekrar gidilirse veriyi yeniden çekmez
+  if(name==='stock'){
+    if(!_cacheGecerli('stock')){ loadProducts(); _cacheGuncelle('stock'); }
+    else { renderProductsFiltered(); } // sadece UI güncelle
+  }
+  if(name==='satis'){
+    if(!_cacheGecerli('satis')){ loadSatisPage(); _cacheGuncelle('satis'); }
+  }
+  if(name==='dashboard'){
+    loadDashboardInit(); // Dashboard her zaman taze veri çeksin
+  }
+  if(name==='alacaklar'){
+    if(!_cacheGecerli('alacaklar')){ loadDebtors(); _cacheGuncelle('alacaklar'); }
+    else { renderDebtorList(); if(S.activeDebtorId) renderDebtorDetail(S.activeDebtorId); updateAlacakOzet(); }
+  }
+  if(name==='verecekler'){
+    if(!_cacheGecerli('verecekler')){ loadCreditors(); _cacheGuncelle('verecekler'); }
+    else { renderCreditorList(); if(S.activeCreditorId) renderCreditorDetail(S.activeCreditorId); updateVerecekOzet(); }
+  }
+  if(name==='eskiborc'){
+    if(!_cacheGecerli('eskiborc')){ renderEskiBorc(); _cacheGuncelle('eskiborc'); }
+  }
 }
 
 // ══════════════════════════════════════
@@ -1307,7 +1336,7 @@ function filterSub(sub){
 // ══════════════════════════════════════
 //  PRODUCTS
 // ══════════════════════════════════════
-async function loadProducts(){
+async function loadProducts(){ _cacheSifirla('stock');
   showLoad();
   try{
     let q=db.from('products').select('*').order('name');
@@ -2185,7 +2214,7 @@ async function exportPDF(){
 // ══════════════════════════════════════
 //  DEBTORS
 // ══════════════════════════════════════
-async function loadDebtors(filter=''){
+async function loadDebtors(filter=''){ _cacheSifirla('alacaklar');
   showLoad();
   try{
     let q=db.from('debtors').select('*, debtor_transactions(*, debt_payments(*))').order('name');
@@ -2688,7 +2717,7 @@ async function doLogout(){
 // ══════════════════════════════════════
 //  CREDITORS
 // ══════════════════════════════════════
-async function loadCreditors(filter=''){
+async function loadCreditors(filter=''){ _cacheSifirla('verecekler');
   showLoad();
   try{
     let q=db.from('creditors').select('*, creditor_transactions(*, creditor_payments(*))').order('name');
